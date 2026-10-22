@@ -24,10 +24,10 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="style.css?v=13.1" />
-  <link rel="stylesheet" href="hmi-v10.css?v=13.1" />
-  <link rel="stylesheet" href="professional.css?v=13.1" />
-  <link rel="stylesheet" href="arena.css?v=13.1" />
+  <link rel="stylesheet" href="style.css?v=13.2" />
+  <link rel="stylesheet" href="hmi-v10.css?v=13.2" />
+  <link rel="stylesheet" href="professional.css?v=13.2" />
+  <link rel="stylesheet" href="arena.css?v=13.2" />
 </head>
 <body>
   <a class="skip-link" href="#mainContent">Vai al contenuto</a>
@@ -324,6 +324,7 @@
       <section class="view" id="teams" aria-labelledby="teamsTitle">
         <div class="view-heading"><div><p class="overline">Iscrizioni</p><h1 id="teamsTitle">Squadre partecipanti</h1><p>Un elenco unico, aggiornato in ogni fase del torneo.</p></div><span class="info-chip" id="teamCountBadge">0 / 24 coppie</span></div>
         <div class="stage-banner" id="rosterLockNotice"><span></span><p>Prima dell’avvio puoi inserire, rimuovere e modificare le coppie. Le righe vuote non partecipano.</p></div>
+        <p class="body-copy" id="rosterSyncNotice">Per lavorare da più PC, aggiungi gli admin da Altro e usate la stessa chiave torneo. Il salvataggio condiviso è separato dalla pubblicazione Live.</p>
         <label class="field team-search"><span>Cerca una coppia</span><input id="teamSearch" type="search" placeholder="Nome squadra o giocatori…" autocomplete="off" /></label>
         <section class="card setup-section">
           <div class="section-number"><svg class="ui-icon" aria-hidden="true"><use href="#i-users"/></svg></div>
@@ -470,17 +471,19 @@
             <div class="form-grid compact-form hidden" id="tournamentCreatePanel">
               <label class="field wide"><span>Nome torneo</span><input id="onlineTournamentName" /></label>
               <label class="field wide"><span>Chiave torneo</span><div class="copy-field"><input id="onlineTournamentSlug" autocapitalize="none" spellcheck="false" /><button id="generateTournamentKeyBtn" type="button">Genera</button></div><small>Identifica il torneo nel database e viene inclusa nel link Live.</small></label>
-              <button class="button primary wide" id="createOnlineBtn" type="button">Attiva torneo online</button>
+              <p class="body-copy wide">La prima squadra crea automaticamente una bozza privata. Puoi crearla anche ora e aggiungere subito gli altri admin. La vista giocatori resta disattivata.</p>
+              <button class="button primary wide" id="createOnlineBtn" type="button">Crea bozza condivisa privata</button>
             </div>
             <p class="field-status" id="remoteStatus">Accesso amministratore richiesto</p>
 
             <div class="share-panel hidden" id="sharePanel">
-              <label class="switch-row owner-only"><span><strong>Abilita vista giocatori</strong><small>Solo lettura.</small></span><input id="publicReadToggle" type="checkbox" role="switch" /></label>
+              <label class="switch-row owner-only"><span><strong>Pubblica vista giocatori</strong><small>Rende il torneo visibile dal link Live. Gli admin collaborano anche quando è disattivata.</small></span><input id="publicReadToggle" type="checkbox" role="switch" /></label>
               <div class="public-share-grid">
                 <label class="field"><span>Chiave torneo</span><div class="copy-field"><input id="publicTournamentKeyField" readonly /><button id="copyTournamentKeyBtn" type="button">Copia</button></div></label>
                 <label class="field"><span>Link Live per giocatori</span><div class="copy-field"><input id="publicLink" readonly /><button id="copyPublicLinkBtn" type="button">Copia</button></div></label>
               </div>
-              <div class="inline-actions public-link-actions"><button class="button secondary" id="openPublicLinkBtn" type="button">Apri vista giocatori</button></div>
+              <div class="inline-actions public-link-actions"><button class="button secondary" id="copyAdminLinkBtn" type="button">Copia link accesso admin</button><button class="button secondary" id="openPublicLinkBtn" type="button">Apri vista giocatori</button></div>
+              <p class="body-copy">Gli admin autorizzati possono aprire la bozza con questo link e il proprio account, prima della pubblicazione.</p>
               <small>Revisione: <span id="onlineRevision">—</span></small>
 
               <div class="admin-management hidden" id="adminManagement">
@@ -558,11 +561,11 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="vendor/supabase.js?v=13.1"></script>
-  <script src="config.js?v=13.1"></script>
-  <script src="engine.js?v=13.1"></script>
-  <script src="db.js?v=13.1"></script>
-  <script src="app.js?v=13.1"></script>
+  <script src="vendor/supabase.js?v=13.2"></script>
+  <script src="config.js?v=13.2"></script>
+  <script src="engine.js?v=13.2"></script>
+  <script src="db.js?v=13.2"></script>
+  <script src="app.js?v=13.2"></script>
 
 
 </body>

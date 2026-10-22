@@ -42,6 +42,10 @@ async function create(state=draft()){
   const rows=await as('authenticated',users.owner,'SELECT * FROM public.create_tournament($1,$2,$3::jsonb)',['Test',`test-torneo-${++slugIndex}`,JSON.stringify(state)]);
   return rows.rows[0];
 }
+async function createDraft(state=draft()){
+  return (await as('authenticated',users.owner,'SELECT * FROM public.create_tournament_draft($1,$2,$3::jsonb)',
+    ['Bozza privata',`draft-torneo-${++slugIndex}`,JSON.stringify(state)])).rows[0];
+}
 async function save(row,state,user=users.owner,revision=row.revision){
   return (await as('authenticated',user,'SELECT * FROM public.save_tournament_state($1,$2::jsonb,$3)',[row.id,JSON.stringify(state),revision])).rows[0];
 }
@@ -66,6 +70,64 @@ test('RLS: public read is explicit, anonymous writes and non-member saves are de
   assert.equal((await as('anon',null,'SELECT id FROM public.tournaments WHERE id=$1',[row.id])).rows.length,0);
   assert.equal((await as('authenticated',users.other,'SELECT id FROM public.tournaments WHERE id=$1',[row.id])).rows.length,0);
   assert.equal((await as('authenticated',users.owner,'SELECT id FROM public.tournaments WHERE id=$1',[row.id])).rows.length,1);
+});
+
+test('shared drafts are private at creation and synchronize only among tournament admins',async()=>{
+  const row=await createDraft();
+  assert.equal(row.public_read,false);
+  assert.equal(Number(row.revision),0);
+  assert.equal((await as('authenticated',users.owner,'SELECT public.get_my_tournament_role($1) AS role',[row.id])).rows[0].role,'owner');
+  assert.equal((await as('anon',null,'SELECT id FROM public.tournaments WHERE id=$1',[row.id])).rows.length,0);
+  assert.equal((await as('authenticated',users.other,'SELECT id FROM public.tournaments WHERE id=$1',[row.id])).rows.length,0);
+  await assert.rejects(as('anon',null,'SELECT * FROM public.create_tournament_draft($1,$2,$3::jsonb)',
+    ['Anon','anon-private-draft',JSON.stringify(draft())]),/permission denied/);
+  await assert.rejects(as('authenticated',null,'SELECT * FROM public.create_tournament_draft($1,$2,$3::jsonb)',
+    ['Missing auth','missing-auth-private',JSON.stringify(draft())]),/authentication_required/);
+  await as('authenticated',users.owner,'SELECT public.add_tournament_admin($1,$2)',[row.id,'editor']);
+  const changed=clone(row.state);changed.teams[5].name='Inserita dal secondo admin';
+  const saved=await save(row,changed,users.editor);
+  const seen=(await as('authenticated',users.owner,'SELECT * FROM public.tournaments WHERE id=$1',[row.id])).rows[0];
+  assert.equal(seen.state.teams[5].name,'Inserita dal secondo admin');
+  assert.equal(seen.public_read,false);
+  assert.equal(Number(seen.revision),1);
+  assert.equal((await as('anon',null,'SELECT id FROM public.tournaments WHERE id=$1',[row.id])).rows.length,0);
+  await assert.rejects(as('authenticated',users.editor,'SELECT * FROM public.set_tournament_public_read($1,true)',[row.id]),/owner_required/);
+  const published=(await as('authenticated',users.owner,'SELECT * FROM public.set_tournament_public_read($1,true)',[row.id])).rows[0];
+  assert.equal(published.public_read,true);
+  assert.equal((await as('anon',null,'SELECT state FROM public.tournaments WHERE id=$1',[row.id])).rows[0].state.teams[5].name,saved.state.teams[5].name);
+});
+
+test('private draft creation validates inputs atomically and protects an existing slug',async()=>{
+  const countBefore=Number((await db.query('SELECT count(*) AS n FROM public.tournaments')).rows[0].n);
+  for(const args of [
+    ['','empty-name-draft',JSON.stringify(draft())],
+    ['Name','!',JSON.stringify(draft())],
+    ['Name',null,JSON.stringify(draft())],
+    ['Name','invalid-state-draft','{}'],
+    ['Name','null-state-draft','null'],
+  ]) await assert.rejects(as('authenticated',users.owner,'SELECT * FROM public.create_tournament_draft($1,$2,$3::jsonb)',args),/name_required|invalid_slug|invalid_tournament_state/);
+  assert.equal(Number((await db.query('SELECT count(*) AS n FROM public.tournaments')).rows[0].n),countBefore);
+  const row=await createDraft();
+  await assert.rejects(as('authenticated',users.other,'SELECT * FROM public.create_tournament_draft($1,$2,$3::jsonb)',
+    ['Other',row.slug,JSON.stringify(draft())]),/slug_already_exists/);
+  assert.equal((await as('authenticated',users.owner,'SELECT * FROM public.tournaments WHERE id=$1',[row.id])).rows[0].owner_id,users.owner);
+});
+
+test('shared-draft migration is rerunnable and preserves existing public and private tournaments',async()=>{
+  const published=await create();
+  const hidden=await createDraft();
+  const source=fs.readFileSync(path.join(__dirname,'../MIGRATION_SHARED_DRAFT_V13_2.sql'),'utf8');
+  // Emulate the pre-13.2 API before testing installation and repeatability.
+  await db.exec('DROP FUNCTION public.create_tournament_draft(text,text,jsonb); ALTER TABLE public.tournaments ALTER COLUMN public_read SET DEFAULT true;');
+  await db.exec(source);
+  await db.exec(source);
+  for(const original of [published,hidden]){
+    const actual=(await as('authenticated',users.owner,'SELECT * FROM public.tournaments WHERE id=$1',[original.id])).rows[0];
+    assert.equal(actual.public_read,original.public_read);
+    assert.equal(Number(actual.revision),Number(original.revision));
+    assert.deepEqual(actual.state,original.state);
+  }
+  assert.equal((await createDraft()).public_read,false);
 });
 
 test('only owners may grant/revoke existing admin accounts; owner cannot be removed',async()=>{

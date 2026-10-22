@@ -48,6 +48,8 @@
   const scoreDrafts = new Map();
   let setupDraftForm = { name: null, slug: null };
   let localPersistenceError = false;
+  let sharedDraftRequested = false;
+  let draftCreationFailed = false;
   let remoteConflict = null;
   let onlineRequest = 0;
   let loginInProgress = false;
@@ -66,6 +68,7 @@
     creating: false,
     admins: [],
     accessReady: false,
+    roleCheckedAt: 0,
     savePaused: false,
   };
 
@@ -428,20 +431,28 @@
     if (!bar) return;
     bar.classList.toggle('hidden', !canEdit());
     const button = $('saveNowBtn');
+    if ($('rosterSyncNotice')) $('rosterSyncNotice').textContent = online.configured
+      ? 'Ogni inserimento viene condiviso automaticamente con gli admin autorizzati. Usate la stessa chiave torneo. La pubblicazione Live è separata.'
+      : 'Modalità locale: le squadre restano su questo dispositivo. Per collaborare da più PC occorre attivare il collegamento online.';
     let message;
     if (localPersistenceError && online.tournament && !hasUnsavedLocalChanges()) message = 'Salvato online. La copia locale non è disponibile su questo dispositivo.';
     else if (localPersistenceError) message = 'Salvataggio sul dispositivo non riuscito: esporta un backup prima di chiudere.';
-    else if (online.creating) message = 'Attivazione online in corso. Le nuove modifiche verranno sincronizzate.';
+    else if (online.creating) message = 'Creazione della bozza condivisa… La vista giocatori resta disattivata.';
     else if (scoreDrafts.size) message = `${scoreDrafts.size} ${scoreDrafts.size === 1 ? 'punteggio in bozza' : 'punteggi in bozza'}: conferma ogni gara con “Salva punteggio”.`;
     else if (online.savePaused) message = 'Sincronizzazione sospesa: risolvi il conflitto indicato sotto.';
     else if (online.saving) message = 'Salvataggio online in corso…';
     else if (hasUnsavedLocalChanges() && online.tournament) message = 'Modifiche salvate sul dispositivo, da sincronizzare online.';
-    else if (online.tournament) message = 'Tutte le modifiche sono salvate online.';
-    else if (online.configured) message = 'Bozza salvata sul dispositivo. Attiva il torneo online per condividerla.';
+    else if (pendingRealtimeRow || pendingRemoteRefresh) message = 'Aggiornamento ricevuto: termina il campo attivo per caricare le modifiche in attesa.';
+    else if (online.tournament) message = online.tournament.public_read
+      ? 'Salvato e condiviso con gli admin. Vista giocatori attiva.'
+      : 'Bozza salvata e condivisa con gli admin. Vista giocatori disattivata.';
+    else if (draftCreationFailed) message = 'Bozza salvata sul dispositivo. Condivisione non riuscita: premi “Salva modifiche” per riprovare.';
+    else if (sharedDraftRequested) message = 'Bozza salvata sul dispositivo. Preparazione della condivisione con gli admin…';
+    else if (online.configured) message = 'La prima squadra crea una bozza condivisa riservata agli admin.';
     else message = 'Salvataggio automatico su questo dispositivo.';
     $('saveStatusText').textContent = message;
-    bar.classList.toggle('save-error', localPersistenceError || online.savePaused);
-    bar.classList.toggle('save-pending', Boolean(scoreDrafts.size || online.saving || online.creating || hasUnsavedLocalChanges()));
+    bar.classList.toggle('save-error', localPersistenceError || online.savePaused || draftCreationFailed);
+    bar.classList.toggle('save-pending', Boolean(sharedDraftRequested && !online.tournament || scoreDrafts.size || online.saving || online.creating || hasUnsavedLocalChanges()));
     if (button) button.disabled = online.saving || online.creating || Boolean(scoreDrafts.size);
   }
 
@@ -483,13 +494,17 @@ function hasUnsavedLocalChanges() {
   return localEditVersion > lastSavedEditVersion;
 }
 
-function noteLocalEdit({ teamIndex = null, matchId = null, wholeState = false, delay = 900 } = {}) {
+function noteLocalEdit({ teamIndex = null, matchId = null, wholeState = false, delay = 600 } = {}) {
   onlineRequest += 1; // A pending refresh must not replace a newer local edit.
   if (!hasUnsavedLocalChanges()) draftBaseRevision = online.revision;
   localEditVersion += 1;
   if (Number.isInteger(teamIndex) && teamIndex >= 0) dirtyTeamIndexes.add(teamIndex);
   if (matchId) dirtyMatchIds.add(String(matchId));
   if (wholeState) dirtyWholeState = true;
+  if ((Number.isInteger(teamIndex) || wholeState && Engine.activeTeams(state).length) && online.configured && online.session && !online.tournament) {
+    sharedDraftRequested = true;
+    draftCreationFailed = false;
+  }
   state.metadata.updatedAt = new Date().toISOString();
   const stored = saveLocalState();
   if (online.tournament) setConnectionStatus(stored ? 'Bozza salvata…' : 'Da sincronizzare…', stored ? '' : 'error');
@@ -505,8 +520,111 @@ function clearDirtyTracking(savedVersion) {
   dirtyMatchIds.clear();
 }
 
+function sameValue(a, b) {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false;
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every(key => Object.prototype.hasOwnProperty.call(b, key) && sameValue(a[key], b[key]));
+}
+
+// Merge only roster edits. Settings, draw and match changes retain the explicit conflict flow.
+function mergeRosterState(baseValue, localValue, remoteValue) {
+  if (!baseValue || !localValue || !remoteValue) return null;
+  const base = Engine.normalizeState(cloneValue(baseValue));
+  const local = Engine.normalizeState(cloneValue(localValue));
+  const remote = Engine.normalizeState(cloneValue(remoteValue));
+  const withoutRoster = (value) => {
+    const copy = cloneValue(value);
+    delete copy.teams;
+    if (copy.metadata) delete copy.metadata.updatedAt;
+    return copy;
+  };
+  if (!sameValue(withoutRoster(base), withoutRoster(local)) || !sameValue(withoutRoster(base), withoutRoster(remote))) return null;
+  if (base.teams.length !== local.teams.length || base.teams.length !== remote.teams.length) return null;
+  const merged = cloneValue(remote);
+  const fields = ['name', 'seed', 'manualGroup'];
+  for (let index = 0; index < base.teams.length; index += 1) {
+    const before = base.teams[index], mine = local.teams[index], theirs = remote.teams[index];
+    if (before.id !== mine.id || before.id !== theirs.id) return null;
+    const fixedFields = (item) => Object.fromEntries(Object.entries(item).filter(([key]) => !fields.includes(key) && key !== 'updatedAt'));
+    if (!sameValue(fixedFields(before), fixedFields(mine)) || !sameValue(fixedFields(before), fixedFields(theirs))) return null;
+    let localChange = false;
+    for (const field of fields) {
+      const changed = !sameValue(mine[field], before[field]);
+      if (changed && !sameValue(theirs[field], before[field]) && !sameValue(mine[field], theirs[field])) return null;
+      if (changed) { merged.teams[index][field] = mine[field]; localChange = true; }
+    }
+    if (localChange) merged.teams[index].updatedAt = mine.updatedAt;
+  }
+  if (Engine.validateStateSnapshot(merged)) return null;
+  merged.metadata.updatedAt = local.metadata.updatedAt;
+  return merged;
+}
+
+function paintSharedRoster(previousState = null) {
+  const focused = document.activeElement;
+  if (activeTab === 'teams' && focused?.closest?.('#teamRows')) {
+    // Keep the actual input node so its focus, caret and incomplete values survive.
+    $$('#teamRows tr').forEach((row) => {
+      const item = state.teams[Number(row.dataset.teamIndex)];
+      if (!item) return;
+      const index = Number(row.dataset.teamIndex);
+      const fields = [['.team-name-input', 'name', item.name], ['.seed-input', 'seed', item.seed ?? ''], ['.manual-group-select', 'manualGroup', item.manualGroup || '']];
+      fields.forEach(([selector, field, value]) => {
+        const input = row.querySelector(selector);
+        if (!input || String(input.value) === String(value)) return;
+        if (input === focused) {
+          if (!previousState || String(input.value) !== String(previousState.teams[index]?.[field] ?? '')) return;
+          const start = input.selectionStart, end = input.selectionEnd;
+          input.value = value;
+          if (Number.isInteger(start) && Number.isInteger(end)) input.setSelectionRange?.(Math.min(start, String(value).length), Math.min(end, String(value).length));
+        } else input.value = value;
+      });
+      updateRowStatus(row, item);
+    });
+    $('teamCountBadge').textContent = `${Engine.activeTeams(state).length} / 24 coppie`;
+  } else renderTeamRows();
+  renderHeader(); renderDashboard(); renderLive();
+  updateOnlinePanel(); renderSaveStatus();
+}
+
+function tryApplyRosterUpdate(row) {
+  if (!row || !online.tournament || row.id !== online.tournament.id || row.slug !== tournamentSlug()) return false;
+  if (Number(row.revision) <= Number(online.revision ?? -1)) {
+    if (pendingRealtimeRow && Number(pendingRealtimeRow.revision) <= Number(online.revision ?? -1)) pendingRealtimeRow = null;
+    renderSaveStatus();
+    return true;
+  }
+  if (online.saving || online.savePaused || scoreDrafts.size || dirtyWholeState || dirtyMatchIds.size) return false;
+  if (isEditableControl() && activeTab !== 'teams') return false;
+  const merged = mergeRosterState(online.tournament.state, state, row.state);
+  if (!merged) return false;
+  const focused = document.activeElement;
+  const focusedRow = focused?.closest?.('tr[data-team-index]');
+  if (focusedRow) {
+    const index = Number(focusedRow.dataset.teamIndex);
+    const field = focused.classList.contains('team-name-input') ? 'name'
+      : focused.classList.contains('seed-input') ? 'seed'
+      : focused.classList.contains('manual-group-select') ? 'manualGroup' : null;
+    if (field && String(merged.teams[index]?.[field] ?? '') !== String(state.teams[index]?.[field] ?? '')
+      && String(focused.value) !== String(state.teams[index]?.[field] ?? '')) return false;
+  }
+  const pending = hasUnsavedLocalChanges();
+  const previousState = state;
+  online.tournament = row; online.revision = Number(row.revision);
+  state = merged;
+  if (pending) draftBaseRevision = online.revision;
+  else clearDirtyTracking(localEditVersion);
+  pendingRealtimeRow = null; pendingRemoteRefresh = false;
+  saveLocalState();
+  paintSharedRoster(previousState);
+  setConnectionStatus(pending ? 'Sincronizzazione…' : 'Aggiornato', 'online');
+  if (pending) scheduleOnlineSave(0);
+  return true;
+}
+
 function applyRealtimeRow(row) {
-  if (!row || Number(row.revision) <= Number(online.revision || -1)) return;
+  if (!row || row.id !== online.tournament?.id || row.slug !== tournamentSlug() || Number(row.revision) <= Number(online.revision ?? -1)) return;
   online.tournament = row;
   online.revision = Number(row.revision);
   state = Engine.normalizeState(row.state);
@@ -525,15 +643,17 @@ function applyRealtimeRow(row) {
 }
 
 function applyPendingRealtimeIfSafe() {
-  if (!pendingRealtimeRow || online.saving || isEditableControl() || scoreDrafts.size || hasUnsavedLocalChanges()) return;
+  if (!pendingRealtimeRow || online.saving) return;
+  if (tryApplyRosterUpdate(pendingRealtimeRow)) return;
+  if (isEditableControl() || scoreDrafts.size || hasUnsavedLocalChanges()) return;
   const row = pendingRealtimeRow;
   pendingRealtimeRow = null;
-  if (Number(row.revision) > Number(online.revision || -1)) applyRealtimeRow(row);
+  if (Number(row.revision) > Number(online.revision ?? -1)) applyRealtimeRow(row);
 }
 
 async function refreshOnlineIfSafe() {
   if (!online.configured || !online.session) return;
-  if (isEditableControl() || scoreDrafts.size || hasUnsavedLocalChanges() || online.saving) {
+  if (scoreDrafts.size || online.saving) {
     pendingRemoteRefresh = true;
     return;
   }
@@ -708,7 +828,13 @@ function scheduleManualBoardRender() {
   }
 
   function scheduleOnlineSave(delay = 700) {
-    if (!online.tournament || !canEdit() || online.savePaused) return;
+    if (!canEdit() || online.savePaused) return;
+    if (!online.tournament) {
+      if (!sharedDraftRequested || draftCreationFailed || online.creating || !online.configured || !online.session) return;
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => createOnlineTournament({ background: true }), delay);
+      return;
+    }
     clearTimeout(saveTimer);
     saveTimer = setTimeout(flushOnlineSave, delay);
   }
@@ -722,18 +848,30 @@ async function flushOnlineSave() {
   let snapshot = cloneValue(state);
   const savingId = online.tournament.id;
   const savingUser = online.session?.user?.id;
+  const savingSlug = tournamentSlug();
   try {
     let row;
-    try {
-      row = await DB.saveTournamentState(online.tournament.id, snapshot, online.revision);
-    } catch (error) {
-      if (!String(error.message || '').includes('revision_conflict')) throw error;
-
-      const latest = await DB.loadTournamentBySlug(tournamentSlug());
-      online.savePaused = true;
-      remoteConflict = latest;
-      showSaveProblem('Un altro admin ha salvato una versione più recente. La tua bozza è conservata: scaricala, carica la versione online e riapplica le modifiche necessarie.', true);
-      return;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        row = await DB.saveTournamentState(savingId, snapshot, online.revision);
+        break;
+      } catch (error) {
+        if (!String(error.message || '').includes('revision_conflict')) throw error;
+        const latest = await DB.loadTournamentBySlug(savingSlug);
+        if (online.tournament?.id !== savingId || online.session?.user?.id !== savingUser || tournamentSlug() !== savingSlug) return;
+        const merged = latest?.id === savingId && !dirtyWholeState && !dirtyMatchIds.size && !scoreDrafts.size
+          ? mergeRosterState(online.tournament.state, state, latest.state) : null;
+        if (!merged || attempt === 2) {
+          online.savePaused = true;
+          remoteConflict = latest;
+          showSaveProblem('Un altro admin ha modificato gli stessi dati o la struttura del torneo. La tua bozza è conservata: scaricala, carica la versione condivisa e riapplica le modifiche necessarie.', true);
+          return;
+        }
+        online.tournament = latest; online.revision = Number(latest.revision);
+        state = merged; draftBaseRevision = online.revision;
+        snapshot = cloneValue(state); saveVersion = localEditVersion;
+        saveLocalState(); paintSharedRoster();
+      }
     }
 
     if (online.tournament?.id !== savingId || online.session?.user?.id !== savingUser) return;
@@ -766,6 +904,7 @@ function humanizeError(error) {
     const normalized = raw.toLowerCase();
     const dictionary = [
       ['authentication_required', 'Accedi prima come amministratore.'],
+      ['shared_draft_migration_required', 'Per attivare le bozze condivise esegui MIGRATION_SHARED_DRAFT_V13_2.sql nel SQL Editor di Supabase, poi premi Salva modifiche. La bozza resta salvata sul dispositivo.'],
       ['not_allowed', 'Non hai i permessi per questa operazione.'],
       ['owner_required', 'Questa operazione è riservata al proprietario del torneo.'],
       ['slug_already_exists', 'Questo indirizzo è già utilizzato.'],
@@ -797,17 +936,38 @@ function humanizeError(error) {
   async function loadOnlineTournament({ quiet = false, force = false } = {}) {
     if (!online.configured) return false;
     if (online.creating) return false;
-    if (!force && online.accessReady && (isEditableControl() || scoreDrafts.size || hasUnsavedLocalChanges() || online.saving)) {
+    if (!force && online.accessReady && (scoreDrafts.size || online.saving)) {
       pendingRemoteRefresh = true;
       return false;
     }
     const requestId = ++onlineRequest;
     const requestedSlug = tournamentSlug();
+    const accessWasReady = online.accessReady;
     try {
       const row = await DB.loadTournamentBySlug(requestedSlug);
       if (requestId !== onlineRequest || requestedSlug !== tournamentSlug()) return false;
+      if (!force && online.accessReady && online.tournament && row?.id === online.tournament.id) {
+        if (online.session && Date.now() - online.roleCheckedAt > 30000) {
+          const currentRole = await DB.getMyRole(row.id);
+          if (requestId !== onlineRequest || requestedSlug !== tournamentSlug()) return false;
+          online.roleCheckedAt = Date.now();
+          if (currentRole !== online.role) {
+            online.role = currentRole;
+            online.admins = currentRole ? await DB.listTournamentAdmins(row.id) : [];
+            updateAccessUI(); updateOnlinePanel(); renderSaveStatus();
+          }
+        }
+        if (Number(row.revision) <= Number(online.revision ?? -1)) return true;
+        handleRealtimeUpdate(row);
+        return true;
+      }
+      if (!force && online.tournament && (isEditableControl() || hasUnsavedLocalChanges())) { pendingRemoteRefresh = true; return false; }
       online.accessReady = true;
       if (!row) {
+        if (!force && accessWasReady && !online.tournament && online.session && !isPublicView()) {
+          pendingRemoteRefresh = false;
+          return false;
+        }
         online.tournament = null;
         online.role = null;
         online.revision = null;
@@ -816,29 +976,35 @@ function humanizeError(error) {
         const savedSetup = readSetupDraft();
         state = savedSetup?.state || Engine.createDefaultState();
         setupDraftForm = { name: savedSetup?.form?.name ?? null, slug: savedSetup?.form?.slug ?? null };
+        sharedDraftRequested = Boolean(savedSetup && Engine.activeTeams(state).length);
         clearDirtyTracking(localEditVersion);
-        showUnavailable('Torneo non disponibile: controlla la chiave e i permessi di accesso.');
-        setConnectionStatus(isPublicView() ? 'Torneo non disponibile' : (online.session ? 'Crea o apri torneo' : 'Login richiesto'));
+        showUnavailable(isPublicView() || !online.session ? 'Torneo non disponibile: controlla la chiave e i permessi di accesso.' : 'Nessuna bozza condivisa accessibile con questa chiave. Se il torneo esiste già, chiedi al proprietario di aggiungere il tuo username agli admin. Per un nuovo evento, la prima squadra crea la bozza privata.');
+        setConnectionStatus(isPublicView() ? 'Torneo non disponibile' : (online.session ? 'Nuova bozza privata' : 'Login richiesto'));
         renderAll();
+        if (sharedDraftRequested) scheduleOnlineSave(600);
         return false;
       }
       const sessionId = online.session?.user?.id;
+      const setupToRecover = !online.tournament ? readSetupDraft() : null;
       const role = online.session ? await DB.getMyRole(row.id) : null;
       const admins = role ? await DB.listTournamentAdmins(row.id) : [];
       if (requestId !== onlineRequest || requestedSlug !== tournamentSlug() || sessionId !== online.session?.user?.id) return false;
       online.tournament = row;
       online.revision = Number(row.revision);
       online.role = role;
+      online.roleCheckedAt = Date.now();
       online.admins = admins;
       showUnavailable('');
       state = Engine.normalizeState(row.state);
       const restoredDraft = readPendingDraft(row);
-      if (restoredDraft) {
-        state = Engine.normalizeState(restoredDraft.state);
-        draftBaseRevision = Number(restoredDraft.baseRevision);
+      const unsharedDraft = !restoredDraft && setupToRecover && Engine.activeTeams(setupToRecover.state).length
+        && (!sameValue(setupToRecover.state.teams, state.teams) || !sameValue(setupToRecover.state.settings, state.settings));
+      if (restoredDraft || unsharedDraft) {
+        state = Engine.normalizeState(restoredDraft ? restoredDraft.state : setupToRecover.state);
+        draftBaseRevision = restoredDraft ? Number(restoredDraft.baseRevision) : -1;
         dirtyWholeState = true;
         localEditVersion += 1;
-        if (Number(restoredDraft.baseRevision) !== Number(row.revision)) {
+        if (unsharedDraft || Number(restoredDraft.baseRevision) !== Number(row.revision)) {
           remoteConflict = row; online.savePaused = true;
           showSaveProblem('È presente una bozza non sincronizzata e il torneo online è cambiato. Scarica la bozza prima di caricare la versione online.', true);
         } else {
@@ -852,7 +1018,7 @@ function humanizeError(error) {
         state.metadata.migrationNeedsSave = false;
         state.metadata.updatedAt = new Date().toISOString();
       }
-      if (!restoredDraft) {
+      if (!restoredDraft && !unsharedDraft) {
         lastSavedEditVersion = localEditVersion;
         dirtyWholeState = false;
         dirtyTeamIndexes.clear();
@@ -861,6 +1027,7 @@ function humanizeError(error) {
       saveLocalState();
       pendingRemoteRefresh = false;
       DB.subscribeToTournament(row.id, handleRealtimeUpdate);
+      sharedDraftRequested = false;
       setConnectionStatus(online.savePaused ? 'Conflitto da risolvere' : (restoredDraft ? 'Bozza recuperata…' : 'Online'), online.savePaused ? 'error' : 'online');
       renderAll();
       if (migrationPending && online.role) {
@@ -883,7 +1050,8 @@ function humanizeError(error) {
 
 
 function handleRealtimeUpdate(row) {
-  if (!row || Number(row.revision) <= Number(online.revision || -1)) return;
+  if (!row || row.id !== online.tournament?.id || row.slug !== tournamentSlug() || Number(row.revision) <= Number(online.revision ?? -1)) return;
+  if (tryApplyRosterUpdate(row)) return;
   if (online.saving || isEditableControl() || scoreDrafts.size || hasUnsavedLocalChanges()) {
     if (!pendingRealtimeRow || Number(row.revision) > Number(pendingRealtimeRow.revision || -1)) {
       pendingRealtimeRow = row;
@@ -1394,6 +1562,11 @@ async function initializeOnline() {
       };
       name.addEventListener('input',updateName);
       if (locked) name.addEventListener('change',updateName);
+      name.addEventListener('change', () => {
+        if (!canEdit()) return;
+        if (online.tournament) flushOnlineSave();
+        else scheduleOnlineSave(0);
+      });
       row.querySelector('.seed-input').addEventListener('change',(event)=>{
         if (!ensureRosterEditable()) return;
         const value = event.target.value.trim();
@@ -1402,12 +1575,12 @@ async function initializeOnline() {
           event.target.value = state.teams[index].seed ?? ''; showToast('TS: inserisci un intero da 1 a 24.', 'error'); return;
         }
         state.teams[index].seed=seed; state.teams[index].updatedAt=new Date().toISOString();
-        updateRowStatus(row,state.teams[index]);noteLocalEdit({teamIndex:index});updateSetupDerived();scheduleManualBoardRender();
+        updateRowStatus(row,state.teams[index]);noteLocalEdit({teamIndex:index,delay:0});updateSetupDerived();scheduleManualBoardRender();
       });
       select.addEventListener('change',(event)=>{
         if (!ensureRosterEditable()) return;
         state.teams[index].manualGroup = event.target.value ? Number(event.target.value) : null;
-        state.teams[index].updatedAt=new Date().toISOString();noteLocalEdit({teamIndex:index});updateSetupDerived();scheduleManualBoardRender();
+        state.teams[index].updatedAt=new Date().toISOString();noteLocalEdit({teamIndex:index,delay:0});updateSetupDerived();scheduleManualBoardRender();
       });
     });
   }
@@ -2063,7 +2236,7 @@ async function initializeOnline() {
     if ($('publicTournamentKeyField')) $('publicTournamentKeyField').value = key;
 
     $('remoteStatus').textContent = online.tournament
-      ? `Online · aggiornato ${new Date(online.tournament.updated_at).toLocaleString('it-IT')}`
+      ? `${online.tournament.public_read ? 'Vista giocatori attiva' : 'Bozza privata condivisa con gli admin'} · aggiornato ${new Date(online.tournament.updated_at).toLocaleString('it-IT')}`
       : online.session
         ? `Autenticato · nessun torneo trovato con la chiave “${key}”`
         : configured
@@ -2182,15 +2355,17 @@ async function initializeOnline() {
     } finally { loginInProgress = false; $('adminLoginBtn').disabled = false; }
   }
 
-  async function createOnlineTournament() {
+  async function createOnlineTournament({ background = false } = {}) {
     if (!online.session || !online.accessReady) { showToast('Accedi e attendi la connessione prima di creare un torneo.', 'error'); return; }
     if (online.creating || online.saving || hasUnsavedLocalChanges() && online.tournament) { showToast('Completa il salvataggio prima di creare un altro torneo.', 'error'); return; }
-    const name = $('onlineTournamentName').value.trim();
-    const slug = normalizeTournamentKey($('onlineTournamentSlug').value);
+    const name = String(setupDraftForm.name ?? $('onlineTournamentName').value ?? state.settings.tournamentName).trim() || state.settings.tournamentName;
+    const slug = normalizeTournamentKey(setupDraftForm.slug ?? $('onlineTournamentSlug').value) || tournamentSlug();
     if (!name || !slug) { showToast('Compila nome e chiave torneo.', 'error'); return; }
     const draftKey = setupDraftKey();
     const creatingUser = online.session.user.id;
     online.creating = true;
+    sharedDraftRequested = true;
+    draftCreationFailed = false;
     onlineRequest += 1;
     $('createOnlineBtn').disabled = true;
     updateOnlinePanel();
@@ -2206,6 +2381,7 @@ async function initializeOnline() {
       online.revision = Number(row.revision);
       online.role = 'owner'; online.accessReady = true;
       showUnavailable('');
+      sharedDraftRequested = false;
       clearDirtyTracking(createVersion);
       setTournamentKeyInUrl(slug);
       setupDraftForm = { name: null, slug: null };
@@ -2214,11 +2390,14 @@ async function initializeOnline() {
       if (hasUnsavedLocalChanges()) scheduleOnlineSave(0);
       DB.subscribeToTournament(row.id, handleRealtimeUpdate);
       await refreshAdminList({ quiet: true });
-      renderAll();
-      switchTab('dashboard');
+      if (background) { paintSharedRoster(); updateAccessUI(); }
+      else { renderAll(); switchTab('dashboard'); }
       setConnectionStatus(hasUnsavedLocalChanges() ? 'Sincronizzazione…' : 'Online', 'online');
-      showToast('Torneo online attivato. Ora puoi abilitare e condividere il link Live.', 'success');
-    } catch (error) { showToast(humanizeError(error), 'error'); }
+      showToast('Bozza condivisa creata. Aggiungi gli altri admin da Altro. La vista giocatori è disattivata.', 'success');
+    } catch (error) {
+      draftCreationFailed = true;
+      showToast(humanizeError(error), 'error');
+    }
     finally { online.creating = false; updateOnlinePanel(); renderSaveStatus(); }
   }
 
@@ -2376,6 +2555,7 @@ async function initializeOnline() {
       if (!ensureEditable()) return;
       if (isEditableControl()) document.activeElement.blur();
       const stored = saveLocalState();
+      if (!online.tournament && online.configured && online.session) await createOnlineTournament({ background: true });
       if (online.tournament && hasUnsavedLocalChanges()) await flushOnlineSave();
       renderSaveStatus();
       if (!scoreDrafts.size && !hasUnsavedLocalChanges() && !online.savePaused && stored) showToast(online.tournament ? 'Modifiche salvate online.' : 'Modifiche salvate su questo dispositivo.', 'success');
@@ -2559,7 +2739,7 @@ async function initializeOnline() {
     $('newTournamentBtn').addEventListener('click',async()=>{
       if (!online.session || online.saving || online.creating) return;
       if (scoreDrafts.size || hasUnsavedLocalChanges()) { showToast('Salva o risolvi le modifiche in sospeso prima di aprire un nuovo torneo.', 'error'); return; }
-      const confirmed = await confirmAction('Preparare un nuovo torneo?', 'Si aprirà una nuova scheda evento con iscrizioni vuote. Scegli nome e chiave, poi premi Attiva torneo online.', 'Prepara torneo');
+      const confirmed = await confirmAction('Preparare un nuovo torneo?', 'Si aprirà una nuova scheda evento con iscrizioni vuote. Scegli nome e chiave: la prima squadra creerà la bozza privata condivisa con gli admin.', 'Prepara torneo');
       if (!confirmed) return;
       clearTimeout(saveTimer); DB.unsubscribe(); onlineRequest += 1;
       const key = generateTournamentKey();
@@ -2568,6 +2748,7 @@ async function initializeOnline() {
       scoreDrafts.clear(); clearDirtyTracking(localEditVersion); hideSaveProblem(); showUnavailable('');
       setTournamentKeyInUrl(key); state = Engine.createDefaultState();
       setupDraftForm = { name: null, slug: null };
+      sharedDraftRequested = false; draftCreationFailed = false;
       saveLocalState();
       setConnectionStatus('Crea o apri torneo');
       renderAll(); switchTab('more'); $('onlineTournamentName').focus();
@@ -2603,6 +2784,7 @@ async function initializeOnline() {
     });
     $('publicReadToggle').addEventListener('change', togglePublicRead);
     $('copyTournamentKeyBtn').addEventListener('click', () => copyText($('publicTournamentKeyField').value, 'Chiave torneo copiata.'));
+    $('copyAdminLinkBtn')?.addEventListener('click', () => copyText(buildLink({live:false}), 'Link admin copiato. Ogni amministratore deve accedere con il proprio account.'));
     $('copyPublicLinkBtn').addEventListener('click', () => copyText($('publicLink').value, 'Link Live copiato.'));
     $('openPublicLinkBtn').addEventListener('click', () => {
       if (!$('publicLink').value) return;
@@ -2658,7 +2840,6 @@ async function initializeOnline() {
     document.addEventListener('change', trackSetup);
     document.addEventListener('focusout', () => {
       setTimeout(async () => {
-        if (isEditableControl()) return;
         if (hasUnsavedLocalChanges()) await flushOnlineSave();
         applyPendingRealtimeIfSafe();
         if (pendingRemoteRefresh && !hasUnsavedLocalChanges()) refreshOnlineIfSafe();
@@ -2667,11 +2848,18 @@ async function initializeOnline() {
     window.addEventListener('beforeunload', (event) => {
       if (scoreDrafts.size || hasUnsavedLocalChanges() || online.creating || (localPersistenceError && !online.tournament)) { event.preventDefault(); event.returnValue = ''; }
     });
-    window.addEventListener('online', () => { if (hasUnsavedLocalChanges() && !online.savePaused) flushOnlineSave(); });
+    window.addEventListener('online', () => {
+      if (hasUnsavedLocalChanges() && !online.savePaused) flushOnlineSave();
+      if (sharedDraftRequested && !online.tournament && !online.creating) {
+        draftCreationFailed = false;
+        scheduleOnlineSave(0);
+      }
+    });
     window.addEventListener('pagehide', () => {
       captureBackgroundUiState();
       saveLocalState();
       if (hasUnsavedLocalChanges()) flushOnlineSave();
+      else if (sharedDraftRequested && !online.tournament) scheduleOnlineSave(0);
     });
 
     window.addEventListener('beforeinstallprompt', (event) => {
@@ -2705,9 +2893,9 @@ async function initializeOnline() {
     captureBackgroundUiState();
     await initializeOnline();
     if (online.configured) setInterval(async () => {
-      if (document.visibilityState !== 'visible' || online.saving || scoreDrafts.size || hasUnsavedLocalChanges()) return;
+      if (document.visibilityState !== 'visible' || online.saving || scoreDrafts.size) return;
       if (isPublicView() || online.session) await loadOnlineTournament({quiet:true});
-    },30000);
+    },3000);
     if ('serviceWorker' in navigator && location.protocol !== 'file:') {
       navigator.serviceWorker.register('sw.js').catch((error) => console.warn('Service worker:', error));
     }

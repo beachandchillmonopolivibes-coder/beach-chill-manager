@@ -1,15 +1,17 @@
-# Beach & Chill · Glow Arena 13.1
+# Beach & Chill · Glow Arena 13.2
 
 Applicazione web responsive per organizzare tornei di beach volley, gestire squadre e risultati e condividere la vista Live con i giocatori. Frontend statico su Vercel; autenticazione, database e aggiornamenti su Supabase.
 
 ## Parti da qui
 
-La **13.1 corregge la persistenza delle modifiche** e aggiunge un comando di salvataggio esplicito. Leggi **[Correzione salvataggi e aggiornamento](docs/CORREZIONE_SALVATAGGI_V13_1.md)** per aggiornare il sito e distinguere salvataggio locale, sincronizzazione online e bozze dei punteggi.
+La **13.2 aggiunge la bozza online privata e condivisa tra gli admin**, anche prima dell’avvio del torneo. Prima di pubblicare questa versione, esegui una volta **`MIGRATION_SHARED_DRAFT_V13_2.sql`** nel SQL Editor del tuo progetto Supabase, poi segui **[Bozza condivisa: aggiornamento e accessi](docs/BOZZA_CONDIVISA_V13_2.md)**.
 
-Se aggiorni una versione 11 o 12 già online, segui **[Aggiornare il layout Glow Arena 13](docs/AGGIORNAMENTO_LAYOUT_V13.md)**. Per questo restyling non servono migrazioni SQL o nuovi amministratori.
+Il calendario dei nuovi tornei fa avanzare i gironi in parallelo: con due campi e due gironi usa Campo 1 per A e Campo 2 per B; con più gironi alterna i gruppi tra gli slot. I tornei già avviati conservano il calendario esistente.
+
+La correzione dei salvataggi della 13.1 è inclusa: la relativa [guida](docs/CORREZIONE_SALVATAGGI_V13_1.md) spiega salvataggio locale, sincronizzazione online e conferma dei punteggi. Per installare la **13.2** segui però prima la nuova guida e la nuova migrazione sopra indicate.
 
 1. Leggi **[Guida Supabase + Vercel](docs/GUIDA_SUPABASE_VERCEL.md)** per installazione, amministratori e pubblicazione.
-2. Per un database esistente segui **[Aggiornamento senza perdita di dati](docs/AGGIORNAMENTO_V11.md)** prima del deploy.
+2. Per un database precedente alla 11 segui prima **[Aggiornamento senza perdita di dati](docs/AGGIORNAMENTO_V11.md)**, poi applica la migrazione della **[13.2](docs/BOZZA_CONDIVISA_V13_2.md)** prima del deploy.
 3. Segui **[Manuale operativo](docs/MANUALE_OPERATIVO.md)** per iscrizioni, avvio, punteggi e correzioni.
 
 ## Regola operativa del torneo
@@ -23,6 +25,7 @@ Gli accessi sono individuali: il proprietario gestisce gli amministratori; gli a
 - Pagina dedicata all’inserimento e alla modifica delle squadre.
 - Gironi + playoff Gold, Silver opzionale, Gold a 4/6/8; girone unico + Final Four; eliminazione diretta; doppia eliminazione.
 - Composizione manuale o sorteggio riproducibile con teste di serie.
+- Calendario dei gironi in parallelo, con rotazione dei gruppi sugli slot disponibili.
 - Formati distinti per gironi, turni eliminatori e semifinali; finali 21/21/15.
 - Risultati con validazione, classifiche, tabelloni e avanzamento dei turni.
 - Backup JSON e vista Live per pubblico e giocatori.

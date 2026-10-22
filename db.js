@@ -136,12 +136,17 @@
   async function createTournament(name, slug, state) {
     const c = getClient();
     if (!c) throw new Error('Supabase non configurato.');
-    const { data, error } = await c.rpc('create_tournament', {
+    const { data, error } = await c.rpc('create_tournament_draft', {
       p_name: name.trim(),
       p_slug: slug.trim().toLowerCase(),
       p_state: state,
     });
-    if (error) throw error;
+    if (error) {
+      if (['PGRST202', '42883'].includes(error.code) && String(error.message || '').includes('create_tournament_draft')) {
+        throw new Error('shared_draft_migration_required');
+      }
+      throw error;
+    }
     return Array.isArray(data) ? data[0] : data;
   }
 

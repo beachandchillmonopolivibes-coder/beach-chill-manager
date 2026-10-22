@@ -802,8 +802,13 @@
     const dayEnd = scheduleTimeToMinutes(state.settings.dayEnd) ?? 1080;
     const stageMatches = state.matches
       .filter((match) => match.stage === stage && isPlayableMatch(match))
-      .sort((a, b) => (a.groupRound || 0) - (b.groupRound || 0) || a.order - b.order || a.bracketOrder - b.bracketOrder);
+      .sort((a, b) => a.bracket === GROUP_BRACKET && b.bracket === GROUP_BRACKET
+        ? a.order - b.order || a.bracketOrder - b.bracketOrder
+        : (a.groupRound || 0) - (b.groupRound || 0) || a.order - b.order || a.bracketOrder - b.bracketOrder);
     const stageIds = new Set(stageMatches.map((match) => match.id));
+    const scheduledGroups = state.groups.filter((group) => stageMatches.some((match) => match.bracket === GROUP_BRACKET && match.groupId === group.id));
+    const rotateGroups = scheduledGroups.length > 1 && stageMatches.every((match) => match.bracket === GROUP_BRACKET);
+    const groupIndexes = new Map(scheduledGroups.map((group, index) => [group.id, index]));
     state.metadata.scheduleWarnings = (Array.isArray(state.metadata.scheduleWarnings) ? state.metadata.scheduleWarnings : [])
       .filter((entry) => !stageIds.has(entry.matchId));
     if (!stageMatches.length) return state;
@@ -842,21 +847,30 @@
       }
     });
 
+    // When groups share courts, keep the chronological queue in rotation.
+    // Dedicated courts can fill their own free slots independently.
+    let groupQueueStart = baseStart;
     stageMatches.forEach((match) => {
       if (existingIds.has(match.id)) return;
       let assigned = false;
       if (!missingPrevious) {
-        for (let start = baseStart; start + slotMinutes <= dayEnd && !assigned; start += slotMinutes) {
+        for (let start = rotateGroups && scheduledGroups.length > courts ? groupQueueStart : baseStart; start + slotMinutes <= dayEnd && !assigned; start += slotMinutes) {
           // Un intervallo libero fra due gare della stessa coppia offre riposo
           // e protegge dalle partite che superano la durata indicativa dello slot.
           const teamBusy = [match.aId, match.bId].some((id) => (teamBookings.get(id) || []).some((other) => Math.abs(start - other) < slotMinutes * 2));
           if (teamBusy) continue;
           for (let number = 1; number <= courts; number += 1) {
+            // With enough courts each group has its own court(s): A uses 1,3
+            // and B uses 2,4 with four courts, or A=1 / B=2 with two courts.
+            // Existing manual bookings above remain untouched, on any court.
+            if (rotateGroups && scheduledGroups.length <= courts
+              && (number - 1) % scheduledGroups.length !== groupIndexes.get(match.groupId)) continue;
             const court = `Campo ${number}`;
             if ((courtBookings.get(court) || []).some((other) => Math.abs(start - other) < slotMinutes)) continue;
             match.startTime = scheduleMinutesToTime(start);
             match.court = court;
             reserve(match, start);
+            if (rotateGroups) groupQueueStart = start;
             assigned = true;
             break;
           }
@@ -1576,23 +1590,33 @@
   }
 
   function createGroupMatches(state, groups) {
+    // Retain stable match identifiers for the same draw, while registering the
+    // games in playing order: A1, B1, C1, A2, B2, C2. Each group keeps its
+    // own round order even when manual groups have different numbers of teams.
+    let legacyOrdinal = 1;
+    const schedules = groups.map((group, groupIndex) => ({
+      group,
+      matches: roundRobinPairs(group.teamIds).flatMap((pairs, roundIndex) => pairs.map(([aId, bId]) => ({
+        aId, bId, groupRound: roundIndex + 1, id: `G${groupIndex + 1}-${roundIndex + 1}-${legacyOrdinal++}`,
+      }))),
+    }));
     let order = 1;
-    groups.forEach((group, groupIndex) => {
-      const rounds = roundRobinPairs(group.teamIds);
-      rounds.forEach((pairs, roundIndex) => {
-        pairs.forEach(([aId, bId]) => {
-          createMatch(state, {
-            id: `G${groupIndex + 1}-${roundIndex + 1}-${order}`,
-            bracket: GROUP_BRACKET, round: group.name, groupId: group.id,
-            groupRound: roundIndex + 1, stage: 0, order, bracketOrder: order,
-            aId, bId,
-            rule: state.settings.formatOptions.groupMatchRule,
-            pairingReason: `${group.name}, giornata ${roundIndex + 1} · ${matchRuleDefinition(state.settings.formatOptions.groupMatchRule).label}.`,
-          });
-          order += 1;
+    const matchCount = Math.max(...schedules.map((entry) => entry.matches.length));
+    for (let index = 0; index < matchCount; index += 1) {
+      schedules.forEach(({ group, matches }) => {
+        const pair = matches[index];
+        if (!pair) return;
+        createMatch(state, {
+          id: pair.id,
+          bracket: GROUP_BRACKET, round: group.name, groupId: group.id,
+          groupRound: pair.groupRound, stage: 0, order, bracketOrder: order,
+          aId: pair.aId, bId: pair.bId,
+          rule: state.settings.formatOptions.groupMatchRule,
+          pairingReason: `${group.name}, giornata ${pair.groupRound} · ${matchRuleDefinition(state.settings.formatOptions.groupMatchRule).label}.`,
         });
+        order += 1;
       });
-    });
+    }
   }
 
   function getGroupStandings(state, groupId) {
@@ -2193,6 +2217,13 @@
         break;
     }
     autoScheduleStage(state, state.stage, { force: true });
+    if (state.matches.every((match) => match.bracket === GROUP_BRACKET)) {
+      // The management list follows the actual mixed schedule. Do this only
+      // for a newly generated event; loading an existing one keeps its order.
+      state.matches.sort((a, b) => (scheduleTimeToMinutes(a.startTime) ?? Infinity) - (scheduleTimeToMinutes(b.startTime) ?? Infinity)
+        || Number(a.court.replace(/^Campo /, '')) - Number(b.court.replace(/^Campo /, '')) || a.order - b.order);
+      state.matches.forEach((match, index) => { match.order = index + 1; match.bracketOrder = index + 1; });
+    }
     state.metadata.startedAt = state.metadata.startedAt || nowIso();
     recomputeTeams(state);
     return state;
