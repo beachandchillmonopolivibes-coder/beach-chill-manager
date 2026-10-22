@@ -1,0 +1,20 @@
+{
+  "name": "beach-chill-tournament-manager",
+  "version": "11.0.0",
+  "private": true,
+  "description": "Gestione tornei Beach & Chill con Supabase e vista Live",
+  "scripts": {
+    "build": "node scripts/build.cjs",
+    "start": "node scripts/serve.cjs",
+    "dev": "npm run build && npm start",
+    "test": "node --test tests/*.test.cjs",
+    "test:browser": "node --test tests/ui.browser.cjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.11",
+    "playwright": "1.60.0"
+  }
+}

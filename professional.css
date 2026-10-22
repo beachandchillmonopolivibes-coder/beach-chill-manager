@@ -1,0 +1,48 @@
+/* Pro 11: legible operational interface, responsive roster and explicit saves. */
+:root { --pro-accent: #067b83; }
+html[data-theme="light"] body { background:#f4f6f8; }
+.ambient-scene { opacity:.22; }
+.topbar { backdrop-filter:blur(18px); }
+.brand-text small { letter-spacing:.06em; }
+.primary-nav { grid-template-columns:repeat(6,minmax(0,1fr)); }
+.notice-banner { border:1px solid #e6b661; background:#fff6df; color:#714d16; border-radius:14px; padding:14px 18px; margin-bottom:18px; font-size:14px; line-height:1.6; }
+html[data-theme="dark"] .notice-banner { background:#362b17; color:#f7dfb4; border-color:#756139; }
+.conflict-panel { border:2px solid #e6943d; margin-bottom:20px; }
+.conflict-panel h2 { margin-bottom:8px; }
+.conflict-panel p { margin-bottom:16px; line-height:1.6; }
+.team-search { max-width:480px; margin:18px 0; }
+.team-name-input { min-width:210px; }
+.score-draft-status { font-size:13px; min-height:1.3em; color:var(--pro-accent); padding:0 18px; }
+.invalid-score { color:#ce4545; }
+.match-actions { align-items:center; gap:12px; justify-content:space-between; flex-wrap:wrap; }
+.save-match { min-height:44px; }
+.match-card.past-stage { opacity:1; }
+.match-card .court-input:disabled { opacity:.85; }
+#rosterLockNotice { margin-bottom:16px; }
+button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible { outline:3px solid #13a5ac; outline-offset:3px; }
+.tournament-unavailable #live .live-brand-card,.tournament-unavailable #live .live-panel,.tournament-unavailable #live #liveOverview,.tournament-unavailable #live #liveStandings,.tournament-unavailable #live #liveBracket { display:none; }
+@media(min-width:900px) { .main-content { max-width:1240px; margin:auto; } .team-table-wrap .team-name-input { width:100%; } }
+@media(max-width:640px) {
+ .primary-nav { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:2px; }
+ .nav-item { min-width:0; padding:9px 2px; }
+ .nav-item b { font-size:10px; }
+ .nav-item span { font-size:19px; }
+ .view-heading { gap:12px; }
+ #teams .view-heading { flex-wrap:wrap; }
+ .notice-banner { padding:12px; font-size:13px; }
+ .match-actions .save-match { flex:1; }
+ .conflict-panel .inline-actions { flex-direction:column; align-items:stretch; }
+}
+@media(prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none!important; scroll-behavior:auto!important; transition:none!important; } }
+@media(max-width:720px) {
+  #teams .team-name-input { min-width:0; width:100%; }
+  #teams .team-table tr { grid-template-columns:28px minmax(0,1fr); }
+  #teams .team-table td:first-child { grid-row:1 / span 4; }
+  #teams .team-table td:nth-child(2) { grid-column:2; grid-row:1; }
+  #teams .team-table td:nth-child(3) { grid-column:2; grid-row:2; display:flex; align-items:center; gap:10px; }
+  #teams .team-table td:nth-child(3)::before { content:'Testa di serie'; color:var(--text-muted); font-size:12px; }
+  #teams .team-table td:nth-child(3) input { width:78px; }
+  #teams .team-table .manual-group-column:not(.hidden) { grid-column:2; grid-row:3; }
+  #teams .team-table td:last-child { grid-column:2; grid-row:4; }
+  #teams .section-content { min-width:0; }
+}

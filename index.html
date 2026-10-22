@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+  <meta name="theme-color" content="#ff6b35" />
+  <meta name="description" content="Beach & Chill Tournament Manager: gestione professionale, realtime e mobile-first per tornei di beach volley con risultati e classifiche Live." />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Beach & Chill" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="format-detection" content="telephone=no" />
+  <title>Beach & Chill · Tournament Manager Pro 11</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="beach-chill-logo.png" type="image/png" />
+  <link rel="apple-touch-icon" href="beach-chill-logo.png" />
+  <script>
+    (() => {
+      try {
+        const stored = localStorage.getItem('beach-volley-theme');
+        const systemDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+        document.documentElement.dataset.theme = stored || (systemDark ? 'dark' : 'light');
+      } catch (_) {
+        document.documentElement.dataset.theme = 'light';
+      }
+    })();
+  </script>
+  <link rel="stylesheet" href="style.css?v=11.0" />
+  <link rel="stylesheet" href="hmi-v10.css?v=11.0" />
+  <link rel="stylesheet" href="professional.css?v=11.0" />
+</head>
+<body>
+  <a class="skip-link" href="#mainContent">Vai al contenuto</a>
+
+  <div class="ambient-scene" aria-hidden="true">
+    <span class="aurora aurora-coral"></span>
+    <span class="aurora aurora-aqua"></span>
+    <span class="aurora aurora-pink"></span>
+    <span class="ambient-grid"></span>
+    <span class="ambient-noise"></span>
+  </div>
+
+  <div class="app-shell glow-shell">
+    <header class="topbar">
+      <div class="brand" aria-label="Beach Volley Tournament Manager">
+        <span class="brand-mark brand-logo-wrap" aria-hidden="true">
+          <img src="beach-chill-logo.png" alt="" class="brand-logo" />
+        </span>
+        <span class="brand-text">
+          <strong id="appTitle">Beach &amp; Chill</strong>
+          <small id="formatBadge">Tournament Manager</small>
+        </span>
+      </div>
+
+      <div class="topbar-actions">
+        <span class="connection-chip" id="connectionStatus"><span class="connection-dot"></span><span>Locale</span></span>
+        <label class="theme-toggle" title="Cambia tema">
+          <input id="themeToggle" type="checkbox" role="switch" aria-label="Modalità scura" />
+          <span class="theme-toggle-track"><span aria-hidden="true">☀</span><i></i><span aria-hidden="true">☾</span></span>
+        </label>
+        <button class="icon-button hidden" id="installAppBtn" type="button" aria-label="Installa applicazione" title="Installa applicazione">＋</button>
+        <button class="icon-button hide-public" id="openOnlineBtn" type="button" aria-label="Condivisione e accesso online" title="Condivisione online">↗</button>
+      </div>
+    </header>
+
+    <nav class="primary-nav" aria-label="Navigazione principale">
+      <button class="nav-item active hide-public" data-tab="dashboard" type="button" aria-current="page"><span aria-hidden="true">⌂</span><b>Home</b></button>
+      <button class="nav-item editor-only" data-tab="setup" type="button"><span aria-hidden="true">⚙</span><b>Configura</b></button>
+      <button class="nav-item editor-only" data-tab="teams" type="button"><span aria-hidden="true">♧</span><b>Squadre</b></button>
+      <button class="nav-item editor-only" data-tab="matches" type="button"><span aria-hidden="true">▦</span><b>Partite</b></button>
+      <button class="nav-item" data-tab="live" type="button"><span aria-hidden="true">●</span><b>Live</b></button>
+      <button class="nav-item hide-public" data-tab="more" type="button"><span aria-hidden="true">•••</span><b>Altro</b></button>
+    </nav>
+
+    <main id="mainContent" class="main-content">
+      <div class="notice-banner hidden" id="demoNotice" role="status">Modalità locale · i dati restano in questo browser. Configura Supabase per condividere il torneo e abilitare gli admin.</div>
+      <div class="notice-banner hidden" id="unavailableNotice" role="status"></div>
+      <section class="card conflict-panel hidden" id="conflictPanel" role="alert"><h2>Salvataggio da verificare</h2><p id="conflictMessage"></p><div class="inline-actions"><button class="button secondary" id="exportConflictBtn" type="button">Scarica la mia bozza</button><button class="button primary" id="reloadRemoteBtn" type="button">Carica versione online</button><button class="button ghost" id="retrySaveBtn" type="button">Riprova salvataggio</button></div></section>
+      <!-- DASHBOARD -->
+      <section class="view active" id="dashboard" aria-labelledby="dashboardTitle">
+        <div class="view-heading compact-heading">
+          <div>
+            <p class="overline">Torneo</p>
+            <h1 id="dashboardTitle">Stato torneo</h1>
+          </div>
+          <span class="role-chip" id="roleBadge">Modalità locale</span>
+        </div>
+
+        <section class="command-card glow-command" aria-label="Azione consigliata">
+          <div class="command-copy">
+            <div class="command-meta"><span id="heroFormat">Formato da scegliere</span><i></i><span id="heroPhase">Configurazione</span></div>
+            <h2 id="primaryActionTitle">Configura il torneo</h2>
+            <p id="primaryActionHint">Scegli una formula, inserisci le coppie e genera il tabellone.</p>
+            <div class="command-actions">
+              <button class="button primary editor-only" id="primaryActionBtn" type="button">Configura torneo</button>
+              <button class="button secondary" id="openLiveBtn" type="button">Apri vista Live</button>
+            </div>
+          </div>
+          <div class="progress-block" aria-label="Avanzamento torneo">
+            <div class="progress-ring" id="progressRing"><strong id="progressValue">0%</strong><span>completato</span></div>
+          </div>
+        </section>
+
+        <div class="metric-grid" aria-label="Indicatori principali">
+          <article class="metric"><span>Coppie</span><strong id="kpiTeams">0</strong><small>iscritte</small></article>
+          <article class="metric"><span>Partite</span><strong id="kpiMatches">0</strong><small>previste</small></article>
+          <article class="metric"><span>Da giocare</span><strong id="kpiPending">0</strong><small>nel tabellone</small></article>
+          <article class="metric"><span>Campi</span><strong id="kpiCourts">0</strong><small>disponibili</small></article>
+        </div>
+
+        <div class="dashboard-grid">
+          <section class="card priority-card">
+            <div class="card-heading">
+              <div><p class="overline">Ora</p><h2>Prossime partite</h2></div>
+              <button class="text-button quick-tab editor-only" data-target-tab="matches" type="button">Gestisci tutte</button>
+            </div>
+            <div id="nextMatches" class="next-match-list"></div>
+          </section>
+
+          <section class="card plan-card">
+            <div class="card-heading"><div><p class="overline">Piano</p><h2 id="planTitle">Struttura</h2></div></div>
+            <p id="planDescription" class="body-copy">Formula, tempi e avanzamento.</p>
+            <div id="planMetrics" class="plan-metrics"></div>
+          </section>
+        </div>
+
+        <section class="card hidden" id="championCard">
+          <div class="champion-banner"><span aria-hidden="true">🏆</span><div><p>Campione Gold</p><strong id="championName">—</strong></div></div>
+        </section>
+        <section class="card hidden silver-champion-card" id="silverChampionCard">
+          <div class="champion-banner silver"><span aria-hidden="true">🥈</span><div><p>Campione Silver</p><strong id="silverChampionName">—</strong></div></div>
+        </section>
+
+        <section class="card hidden" id="groupPreviewCard">
+          <div class="card-heading"><div><p class="overline">Gironi</p><h2>Classifica</h2></div><button class="text-button quick-tab" data-target-tab="live" type="button">Apri tutte</button></div>
+          <div id="dashboardStandings" class="standings-grid compact"></div>
+        </section>
+
+        <section class="card hidden" id="byeCard">
+          <div class="card-heading">
+            <div><p class="overline">Bye</p><h2>Distribuzione</h2></div>
+            <span class="info-chip" id="nextByeLabel">Prossima priorità: —</span>
+          </div>
+          <div id="byeSummary" class="bye-summary"></div>
+          <details class="disclosure"><summary>Storico e criterio di assegnazione</summary><div id="byeHistory" class="history-list"></div></details>
+        </section>
+      </section>
+
+      <!-- SETUP -->
+      <section class="view" id="setup" aria-labelledby="setupTitle">
+        <div class="view-heading">
+          <div><p class="overline">Setup</p><h1 id="setupTitle">Configura</h1><p>Formula, coppie e giornata.</p></div>
+          <span class="step-indicator">Giornata unica · 1–3</span>
+        </div>
+
+        <section class="card setup-section">
+          <div class="section-number">1</div>
+          <div class="section-content">
+            <div class="card-heading"><div><h2>Formula</h2><p>Scegli il formato del torneo.</p></div></div>
+            <div class="format-grid" id="formatSelector">
+              <button class="format-card" data-format="groups_playoff" type="button">
+                <span class="format-icon" aria-hidden="true">▦</span><strong>Gironi + playoff</strong><small>Gold e Silver</small><em>Completo</em>
+              </button>
+              <button class="format-card" data-format="double_elimination" type="button">
+                <span class="format-icon" aria-hidden="true">↺</span><strong>Doppia eliminazione</strong><small>Due sconfitte</small><em>Competitivo</em>
+              </button>
+              <button class="format-card" data-format="single_elimination" type="button">
+                <span class="format-icon" aria-hidden="true">⌁</span><strong>Eliminazione diretta</strong><small>Una sconfitta</small><em>Rapido</em>
+              </button>
+              <button class="format-card" data-format="round_robin_final4" type="button">
+                <span class="format-icon" aria-hidden="true">◎</span><strong>Girone unico + Final Four</strong><small>Fino a 10 coppie</small><em>Compatto</em>
+              </button>
+            </div>
+
+            <div class="conditional-options hidden group-structure-options" id="groupOptions">
+              <label><span>Numero di gironi</span><select id="groupCountInput"><option>2</option><option>3</option><option selected>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></label>
+              <label><span>Playoff Gold</span><select id="playoffSizeInput"><option value="4">4 squadre · semifinali</option><option value="6">6 squadre · 1ª dei gironi in semifinale</option><option value="8" selected>8 squadre · 1ª dei gironi in semifinale</option></select><small id="playoffStructureHint">Con due gironi, le vincitrici possono essere protette fino alle semifinali.</small></label>
+              <label class="switch-row compact-switch" id="protectGroupWinnersField"><span><strong>Vincitrici direttamente in semifinale</strong><small>Con 2 gironi: le 1ª non disputano quarti. Nel Gold a 8, 3ª e 4ª iniziano dal preliminare.</small></span><input id="protectGroupWinnersInput" type="checkbox" role="switch" /></label>
+              <label><span>Composizione gironi</span>
+                <select id="groupAssignmentModeInput">
+                  <option value="random_protected" selected>Random protetto dalle TS</option>
+                  <option value="manual">Manuale</option>
+                </select>
+              </label>
+              <label class="switch-row compact-switch"><span><strong>Silver Bracket</strong><small>Consolazione per le non qualificate al Gold.</small></span><input id="silverEnabledInput" type="checkbox" role="switch" /></label>
+              <label class="hidden" id="silverSizeField"><span>Partecipanti Silver</span>
+                <select id="silverSizeInput">
+                  <option value="all" selected>Tutte le non qualificate</option>
+                  <option value="4">Migliori 4 non qualificate</option>
+                  <option value="8">Migliori 8 non qualificate</option>
+                  <option value="16">Migliori 16 non qualificate</option>
+                </select>
+              </label>
+            </div>
+
+            <section class="manual-groups-panel hidden" id="manualGroupsPanel">
+              <div>
+                <p class="overline">Composizione manuale</p>
+                <h3>Crea i gironi e sposta liberamente le coppie</h3>
+                <p>Trascina le coppie o usa “Sposta in”.</p>
+              </div>
+              <div class="manual-group-actions">
+                <button class="button ghost" id="removeGroupBtn" type="button">− Girone</button>
+                <button class="button ghost" id="addGroupBtn" type="button">＋ Girone</button>
+                <button class="button secondary" id="balanceManualGroupsBtn" type="button">Precompila equilibrato</button>
+              </div>
+            </section>
+            <div class="manual-group-board hidden" id="manualGroupBoard" aria-label="Composizione manuale dei gironi"></div>
+
+            <section class="group-rule-panel hidden" id="knockoutRuleOptions" aria-label="Formato delle partite a eliminazione">
+              <div class="group-rule-heading">
+                <div><p class="overline">Partite</p><h3>Formato</h3></div>
+                <span class="rule-final-badge">Personalizzabile</span>
+              </div>
+              <div class="group-rule-grid single-column-rule">
+                <label class="field"><span>Partite del torneo</span>
+                  <select id="eliminationMatchRuleInput">
+                    <option value="best_of_3_15" selected>2 su 3 a 15</option>
+                    <option value="best_of_3_21_15">Classico beach: 21, 21, eventuale 15</option>
+                  </select>
+                  <small>Valido per tutti i turni.</small>
+                </label>
+              </div>
+            </section>
+
+            <section class="group-rule-panel hidden" id="groupRuleOptions" aria-label="Regole delle partite a gironi e playoff">
+              <div class="group-rule-heading">
+                <div><p class="overline">Regole</p><h3>Formato partite</h3></div>
+                <span class="rule-final-badge">Finale ufficiale</span>
+              </div>
+              <div class="group-rule-grid">
+                <label class="field"><span>Partite dei gironi</span>
+                  <select id="groupMatchRuleInput">
+                    <option value="single_21" selected>Set unico a 21</option>
+                    <option value="single_15">Set unico a 15</option>
+                    <option value="best_of_3_15">2 su 3 a 15</option>
+                    <option value="best_of_3_21_15">Classico beach: 21, 21, eventuale 15</option>
+                  </select>
+                  <small>Classifica su vittorie, PF, PS, differenza e quoziente punti.</small>
+                </label>
+                <label class="field"><span>Quarti / turni preliminari</span>
+                  <select id="quarterMatchRuleInput">
+                    <option value="single_21" selected>Set unico a 21</option>
+                    <option value="single_15">Set unico a 15</option>
+                    <option value="best_of_3_15">2 su 3 a 15</option>
+                    <option value="best_of_3_21_15">Classico beach: 21, 21, eventuale 15</option>
+                  </select>
+                  <small>Vale per quarti ed eventuali turni preliminari Gold/Silver.</small>
+                </label>
+                <label class="field"><span>Semifinali</span>
+                  <select id="semifinalMatchRuleInput">
+                    <option value="single_21" selected>Set unico a 21</option>
+                    <option value="single_15">Set unico a 15</option>
+                    <option value="best_of_3_15">2 su 3 a 15</option>
+                    <option value="best_of_3_21_15">Classico beach: 21, 21, eventuale 15</option>
+                  </select>
+                  <small>Scelta indipendente dai quarti. Finale sempre 21 · 21 · 15.</small>
+                </label>
+              </div>
+              <article class="official-final-rule">
+                <span aria-hidden="true">🏆</span>
+                <div><strong>Finale classica</strong><small>21 · 21 · eventuale 15</small></div>
+                <em>21 · 21 · 15</em>
+              </article>
+            </section>
+
+            <div class="estimate-strip">
+              <div><span>Partite previste</span><strong id="estimatedMatches">—</strong></div>
+              <div><span>Minimo per coppia</span><strong id="guaranteedMatches">—</strong></div>
+              <div><span>Slot indicativi</span><strong id="estimatedSlots">—</strong></div>
+              <p id="formatRecommendation">Inserisci le coppie per ottenere una stima.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="card setup-section"><div class="section-content"><h2>Partecipanti</h2><p>Inserisci le coppie nella pagina Squadre prima di avviare il torneo.</p><button class="button secondary quick-tab" data-target-tab="teams" type="button">Gestisci squadre</button></div></section>
+
+        <section class="card setup-section">
+          <div class="section-number">3</div>
+          <div class="section-content">
+            <div class="card-heading"><div><h2>Giornata</h2><p>Campi, orari e durata.</p></div></div>
+            <div class="form-grid">
+              <label class="field wide"><span>Nome del torneo</span><input id="tournamentNameInput" maxlength="80" autocomplete="off" /></label>
+              <label class="field"><span>Campi disponibili</span><input id="courtsInput" type="number" min="1" max="12" inputmode="numeric" /></label>
+              <label class="field"><span>Durata slot (min)</span><input id="slotMinutesInput" type="number" min="20" max="120" step="5" inputmode="numeric" /></label>
+              <label class="field"><span>Data torneo</span><input id="eventDateInput" type="date" /></label>
+              <label class="field"><span>Inizio giornata</span><input id="dayStartInput" type="time" /><small>Usato per generare automaticamente campo e orario delle partite.</small></label>
+              <label class="field"><span>Fine desiderata</span><input id="dayEndInput" type="time" /><small>Serve per verificare se il programma entra nella giornata.</small></label>
+              <label class="field wide"><span>Codice sorteggio <small>(facoltativo)</small></span><input id="drawCodeInput" maxlength="20" placeholder="Generato automaticamente" autocomplete="off" /></label>
+            </div>
+            <div class="validation-banner" id="setupValidation"><span aria-hidden="true">●</span><p>Completa la configurazione.</p></div>
+          </div>
+        </section>
+
+        <div class="sticky-action-bar">
+          <div><strong id="stickyFormatLabel">Formula da scegliere</strong><span id="stickySummary">Nessun tabellone generato</span></div>
+          <button class="button primary" id="generateBtn" type="button">Genera torneo</button>
+        </div>
+      </section>
+
+      <section class="view" id="teams" aria-labelledby="teamsTitle">
+        <div class="view-heading"><div><p class="overline">Iscrizioni</p><h1 id="teamsTitle">Squadre partecipanti</h1><p>Un elenco unico, aggiornato in ogni fase del torneo.</p></div><span class="info-chip" id="teamCountBadge">0 / 24 coppie</span></div>
+        <div class="stage-banner" id="rosterLockNotice"><span></span><p>Prima dell’avvio puoi inserire, rimuovere e modificare le coppie. Le righe vuote non partecipano.</p></div>
+        <label class="field team-search"><span>Cerca una coppia</span><input id="teamSearch" type="search" placeholder="Nome squadra o giocatori…" autocomplete="off" /></label>
+        <section class="card setup-section">
+          <div class="section-number">♧</div>
+          <div class="section-content">
+            <div class="card-heading">
+              <div><h2>Coppie e teste di serie</h2><p>TS facoltative e univoche.</p></div>
+              <div class="inline-actions"><button class="text-button" id="loadDefaultsBtn" type="button" title="Carica nel box copia-incolla un template modificabile con nomi segnaposto">Carica esempio</button><button class="text-button danger-text" id="clearTeamsBtn" type="button">Svuota</button></div>
+            </div>
+            <details class="bulk-import-panel" id="bulkImportPanel">
+              <summary><span>Incolla elenco squadre</span><small>Caricamento rapido da WhatsApp, Excel o note</small></summary>
+              <div class="bulk-import-grid">
+                <div class="bulk-import-main">
+                  <label class="field"><span>Elenco da importare</span>
+                    <textarea id="bulkTeamsInput" maxlength="50000" rows="9" placeholder="Esempio:\n1 Giocatore A - Giocatore B\n2 Giocatore C - Giocatore D\n3 Giocatore E - Giocatore F\n4 Giocatore G - Giocatore H\n\nUna coppia per riga"></textarea>
+                  </label>
+                  <div class="bulk-import-actions">
+                    <label class="switch-row compact-switch bulk-seed-toggle"><span><strong>Numeri iniziali = teste di serie</strong><small>Se attivo, 1 diventa TS1, 2 diventa TS2, ecc.</small></span><input id="bulkUseNumbersAsSeeds" type="checkbox" role="switch" /></label>
+                    <button class="button secondary" id="bulkPreviewBtn" type="button">Anteprima</button>
+                    <button class="button primary" id="bulkApplyBtn" type="button">Carica squadre</button>
+                  </div>
+                </div>
+                <div class="bulk-import-preview">
+                  <div class="bulk-preview-head"><strong>Anteprima</strong><span id="bulkPreviewCount">0 coppie</span></div>
+                  <div id="bulkPreviewList" class="bulk-preview-list"><p>Incolla l’elenco e premi Anteprima.</p></div>
+                </div>
+              </div>
+              <p class="bulk-import-help">Formato supportato: una coppia per riga, righe numerate, testo semplice, elenco copiato da WhatsApp, tabella con tab o punto e virgola. Se usi la modalità gironi manuali puoi indicare anche il girone con <code>[A]</code>, <code>Girone A:</code> o <code>(A)</code>.</p>
+            </details>
+
+            <div class="team-table-wrap">
+              <table class="team-table" id="teamTable">
+                <thead><tr><th>#</th><th>Nome coppia</th><th>TS</th><th class="manual-group-column hidden" id="manualGroupHeader">Girone</th><th>Stato</th></tr></thead>
+                <tbody id="teamRows"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+      </section>
+
+      <!-- MATCHES -->
+      <section class="view" id="matches" aria-labelledby="matchesTitle">
+        <div class="view-heading matches-heading">
+          <div><p class="overline">Gestione</p><h1 id="matchesTitle">Partite</h1><p id="currentPhaseTitle">Nessun turno attivo</p></div>
+          <button class="button primary" id="advanceBtn" type="button">Turno successivo</button>
+        </div>
+
+        <div class="filter-bar" aria-label="Filtri partite">
+          <label><span>Fase</span><select id="phaseFilter"><option value="all">Tutte</option></select></label>
+          <label><span>Stato</span><select id="statusFilter"><option value="open">Da gestire</option><option value="all">Tutte</option><option value="completed">Concluse</option><option value="waiting">In attesa</option></select></label>
+          <label class="search-field"><span class="sr-only">Cerca coppia o gara</span><input id="matchSearch" type="search" placeholder="Cerca coppia o gara…" autocomplete="off" /></label>
+        </div>
+
+        <div class="stage-banner" id="stageStatus"><span></span><p>Genera il torneo per iniziare.</p></div>
+        <div id="matchesList" class="match-card-list"></div>
+      </section>
+
+      <!-- LIVE -->
+      <section class="view" id="live" aria-labelledby="liveTitle">
+        <div class="view-heading">
+          <div><p class="overline">Live</p><h1 id="liveTitle">Beach &amp; Chill Live</h1><p id="liveSubtitle">Risultati e classifiche.</p></div>
+          <span class="live-chip"><i></i> Aggiornamento live</span>
+        </div>
+
+        <section class="live-brand-card">
+          <img src="beach-chill-logo.png" alt="Logo Beach &amp; Chill Monopoli Vibes" />
+          <div><p class="overline">Beach &amp; Chill Monopoli Vibes</p><strong id="publicTournamentName">Torneo Live</strong><small>Risultati e classifiche in tempo reale</small></div>
+        </section>
+
+        <div class="segmented" role="tablist" aria-label="Vista live">
+          <button class="active" data-live-view="overview" type="button">Panoramica</button>
+          <button data-live-view="standings" type="button">Classifiche</button>
+          <button data-live-view="bracket" type="button">Tabellone</button>
+        </div>
+
+        <div id="liveOverview" class="live-section active">
+          <section class="card hidden live-champions-card" id="liveChampionsCard">
+            <div class="card-heading"><div><p class="overline">Albo d’oro</p><h2>Vincitori</h2></div></div>
+            <div class="live-champions-grid">
+              <article><span aria-hidden="true">🏆</span><small>Gold</small><strong id="liveGoldChampion">—</strong></article>
+              <article class="silver"><span aria-hidden="true">🥈</span><small>Silver</small><strong id="liveSilverChampion">—</strong></article>
+            </div>
+          </section>
+          <section class="card"><div class="card-heading"><div><p class="overline">In programma</p><h2>Prossime partite</h2></div></div><div id="liveNext" class="public-match-list"></div></section>
+          <section class="card"><div class="card-heading"><div><p class="overline">Ultimi aggiornamenti</p><h2>Risultati</h2></div></div><div id="liveResults" class="result-list"></div></section>
+        </div>
+        <div id="liveStandings" class="live-section"><div id="standingsContent" class="standings-grid"></div></div>
+        <div id="liveBracket" class="live-section"><div id="bracketContent" class="bracket-board"></div></div>
+
+        <details class="card disclosure share-message">
+          <summary>Messaggio WhatsApp pronto da copiare</summary>
+          <textarea id="whatsappText" readonly rows="10"></textarea>
+          <button class="button secondary" id="copyWhatsAppBtn" type="button">Copia messaggio</button>
+        </details>
+      </section>
+
+      <!-- MORE -->
+      <section class="view" id="more" aria-labelledby="moreTitle">
+        <div class="view-heading"><div><p class="overline">Admin</p><h1 id="moreTitle">Accesso &amp; Live</h1><p>Login e condivisione.</p></div></div>
+
+        <div class="settings-grid">
+          <section class="card glow-panel" id="onlineCard">
+            <div class="card-heading">
+              <div><p class="overline">Admin</p><h2>Accesso</h2><p>Gestione riservata. Il pubblico usa il link Live.</p></div>
+              <span class="info-chip glow-chip" id="onlineRole">Non collegato</span>
+            </div>
+            <div class="notice" id="onlineConfigNotice">Configura Supabase in <code>config.js</code> per attivare salvataggio e condivisione.</div>
+
+            <div class="beach-login-hero glow-panel">
+              <div class="login-logo-stage" aria-hidden="true">
+                <span class="logo-orbit orbit-one"></span>
+                <span class="logo-orbit orbit-two"></span>
+                <span class="logo-flare"></span>
+                <img src="beach-chill-logo.png" alt="" class="login-hero-logo" />
+              </div>
+              <div class="login-hero-copy">
+                <p class="overline">Accesso riservato · Beach &amp; Chill</p>
+                <h3>Control room del torneo</h3>
+                <p>Configura il torneo e aggiorna i risultati.</p>
+                <div class="hero-badges" aria-label="Caratteristiche principali"><span><i></i> Realtime</span><span><i></i> Live</span></div>
+              </div>
+            </div>
+
+            <div class="tournament-key-box hidden" id="publicInfoBox">
+              <div><strong>Chiave torneo</strong><small id="publicTournamentKey">—</small></div>
+              <div><strong>Link live</strong><small>Condividi il link solo in modalità visualizzazione</small></div>
+            </div>
+
+            <div class="form-grid compact-form" id="adminLoginPanel">
+              <label class="field wide"><span>Chiave torneo</span><input id="adminTournamentKey" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="es. beach-chill-2026" /></label>
+              <label class="field"><span>Username</span><input id="adminUsername" type="text" inputmode="text" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="es. paolo" /></label>
+              <label class="field"><span>Password</span><span class="password-field"><input id="adminPassword" type="password" autocomplete="current-password" enterkeyhint="go" placeholder="Password amministratore" /><button id="toggleAdminPasswordBtn" type="button" aria-label="Mostra password">Mostra</button></span></label>
+              <button class="button primary wide" id="adminLoginBtn" type="button">Accedi come amministratore</button>
+              <p class="field-status wide" id="authStatus">Non autenticato</p>
+            </div>
+
+            <div class="admin-session hidden" id="adminSessionPanel">
+              <div><span>Sessione attiva</span><strong id="adminCurrentUser">—</strong></div>
+              <div class="inline-actions"><button class="button secondary" id="newTournamentBtn" type="button">Nuovo torneo</button><button class="button ghost" id="signOutBtn" type="button">Esci</button></div>
+            </div>
+
+            <hr />
+            <div class="form-grid compact-form hidden" id="tournamentCreatePanel">
+              <label class="field wide"><span>Nome torneo</span><input id="onlineTournamentName" /></label>
+              <label class="field wide"><span>Chiave torneo</span><div class="copy-field"><input id="onlineTournamentSlug" autocapitalize="none" spellcheck="false" /><button id="generateTournamentKeyBtn" type="button">Genera</button></div><small>Identifica il torneo nel database e viene inclusa nel link Live.</small></label>
+              <button class="button primary wide" id="createOnlineBtn" type="button">Attiva torneo online</button>
+            </div>
+            <p class="field-status" id="remoteStatus">Accesso amministratore richiesto</p>
+
+            <div class="share-panel hidden" id="sharePanel">
+              <label class="switch-row owner-only"><span><strong>Abilita vista giocatori</strong><small>Solo lettura.</small></span><input id="publicReadToggle" type="checkbox" role="switch" /></label>
+              <div class="public-share-grid">
+                <label class="field"><span>Chiave torneo</span><div class="copy-field"><input id="publicTournamentKeyField" readonly /><button id="copyTournamentKeyBtn" type="button">Copia</button></div></label>
+                <label class="field"><span>Link Live per giocatori</span><div class="copy-field"><input id="publicLink" readonly /><button id="copyPublicLinkBtn" type="button">Copia</button></div></label>
+              </div>
+              <div class="inline-actions public-link-actions"><button class="button secondary" id="openPublicLinkBtn" type="button">Apri vista giocatori</button></div>
+              <small>Revisione: <span id="onlineRevision">—</span></small>
+
+              <div class="admin-management hidden" id="adminManagement">
+                <div class="card-heading compact-admin-heading"><div><h3>Amministratori</h3><p>Modifiche sincronizzate.</p></div></div>
+                <div class="invite-row">
+                  <input id="newAdminUsername" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Username del nuovo amministratore" />
+                  <button class="button secondary" id="addAdminBtn" type="button">Aggiungi</button>
+                </div>
+                <div class="admin-list" id="adminList"><p class="empty-state">Nessun amministratore caricato.</p></div>
+              </div>
+            </div>
+
+            <details class="disclosure">
+              <summary>Come funziona l’accesso amministratore?</summary>
+              <p>Nel Dashboard Supabase crea un utente con password e conferma automatica. Usa un indirizzo tecnico come <code>paolo@admin.beachvolley.app</code>; nell’app si accede con lo username <code>paolo</code>. Non viene inviata alcuna email e l’accesso avviene sempre dalla schermata iniziale.</p>
+            </details>
+          </section>
+
+          <section class="card editor-only">
+            <div class="card-heading"><div><p class="overline">Sicurezza</p><h2>Backup e ripristino</h2></div></div>
+            <p class="body-copy">Esporta una copia JSON prima dell’inizio e al termine della giornata.</p>
+            <div class="button-stack"><button class="button secondary" id="exportBtn" type="button">Esporta backup</button><label class="button ghost file-button">Importa backup<input id="importInput" type="file" accept="application/json" /></label></div>
+          </section>
+
+          <section class="card editor-only danger-card">
+            <div class="card-heading"><div><p class="overline">Operazioni irreversibili</p><h2>Reset</h2></div></div>
+            <p class="body-copy">Dopo l’avvio il tabellone è protetto. Puoi correggere i singoli risultati in ogni fase; per un altro evento crea un nuovo torneo.</p>
+            <div class="button-stack"><button class="button secondary" id="resetScoresBtn" type="button">Azzera risultati</button><button class="button danger" id="resetTournamentBtn" type="button">Elimina tabellone</button></div>
+          </section>
+
+          <section class="card">
+            <div class="card-heading"><div><p class="overline">Guida rapida</p><h2>Principi della gestione</h2></div></div>
+            <details class="disclosure"><summary>Come scelgo la formula?</summary><p>Gironi + playoff garantisce più partite e può includere un Silver Bracket; doppia eliminazione premia la continuità; eliminazione diretta riduce tempi e costi; girone unico è indicato per pochi partecipanti.</p></details>
+            <details class="disclosure"><summary>Come correggo un risultato?</summary><p>Nella pagina Partite scegli Tutte le fasi e Tutte le partite, modifica i punti e premi “Salva punteggio”. Se cambiano le qualificazioni, conferma la rimozione delle fasi successive e poi rigenerale. Gli altri risultati della stessa fase rimangono.</p></details>
+            <details class="disclosure"><summary>Come funzionano i bye?</summary><p>Nella doppia eliminazione la TS1 riceve il bye iniziale quando necessario; i successivi sono distribuiti tra le prime tre con priorità ponderata e senza bye consecutivi quando evitabile.</p></details>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <template id="matchTemplate">
+    <article class="match-card">
+      <header class="match-header">
+        <div><span class="match-code"></span><div><strong class="match-round"></strong><small class="match-stage"></small></div></div>
+        <span class="match-status"></span>
+      </header>
+      <div class="match-rule-strip"><span class="match-rule-label"></span><small class="match-rule-note">Due punti di vantaggio</small></div>
+      <label class="court-field"><span>Campo / orario</span><input class="court-input" autocomplete="off" enterkeyhint="done" placeholder="Es. Campo 2 · 14:30" /></label>
+      <div class="score-head"><span>Coppia</span><span class="set-label set-label-1">S1</span><span class="set-label set-label-2">S2</span><span class="set-label set-label-3">S3</span></div>
+      <div class="score-grid">
+        <div class="team-name team-a"></div>
+        <input class="score a1" inputmode="numeric" pattern="[0-9]*" maxlength="3" aria-label="Coppia A, set 1" />
+        <input class="score a2" inputmode="numeric" pattern="[0-9]*" maxlength="3" aria-label="Coppia A, set 2" />
+        <input class="score a3" inputmode="numeric" pattern="[0-9]*" maxlength="3" aria-label="Coppia A, set 3" />
+        <div class="team-name team-b"></div>
+        <input class="score b1" inputmode="numeric" pattern="[0-9]*" maxlength="3" aria-label="Coppia B, set 1" />
+        <input class="score b2" inputmode="numeric" pattern="[0-9]*" maxlength="3" aria-label="Coppia B, set 2" />
+        <input class="score b3" inputmode="numeric" pattern="[0-9]*" maxlength="3" aria-label="Coppia B, set 3" />
+      </div>
+      <div class="match-result" aria-live="polite"></div><p class="score-draft-status" role="status"></p>
+      <details class="match-details"><summary>Dettagli accoppiamento</summary><p class="pairing-reason"></p></details>
+      <div class="match-actions"><button class="text-button clear-match" type="button">Cancella risultato</button><button class="text-button discard-match hidden" type="button">Annulla modifiche</button><button class="button primary save-match" type="button" disabled>Salva punteggio</button></div>
+    </article>
+  </template>
+
+  <dialog class="confirm-dialog" id="confirmDialog">
+    <form method="dialog">
+      <div class="dialog-icon" aria-hidden="true">!</div>
+      <h2 id="confirmTitle">Conferma operazione</h2>
+      <p id="confirmBody"></p>
+      <div class="dialog-actions"><button class="button ghost" id="confirmCancel" value="cancel">Annulla</button><button class="button danger" id="confirmAccept" value="confirm">Conferma</button></div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="vendor/supabase.js?v=11.0"></script>
+  <script src="config.js?v=11.0"></script>
+  <script src="engine.js?v=11.0"></script>
+  <script src="db.js?v=11.0"></script>
+  <script src="app.js?v=11.0"></script>
+
+
+</body>
+</html>

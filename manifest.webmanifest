@@ -1,0 +1,50 @@
+{
+  "name": "Beach & Chill Tournament Manager Pro",
+  "short_name": "Beach & Chill",
+  "description": "Gestione tornei di beach volley: squadre, gironi, playoff e risultati Live.",
+  "lang": "it",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#fff7ef",
+  "theme_color": "#ff6b35",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Gestisci partite",
+      "short_name": "Partite",
+      "url": "./?open=matches",
+      "icons": [
+        {
+          "src": "icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Vista giocatori",
+      "short_name": "Live",
+      "url": "./?live=1",
+      "icons": [
+        {
+          "src": "icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ]
+}
