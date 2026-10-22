@@ -337,7 +337,9 @@
     if (!snapshot) return;
     const desiredTab = isPublicView()
       ? 'live'
-      : (VALID_TABS.has(snapshot.activeTab) ? snapshot.activeTab : activeTab);
+      : online.configured && online.authReady && !online.session
+        ? 'more'
+        : (VALID_TABS.has(snapshot.activeTab) ? snapshot.activeTab : activeTab);
     if (VALID_LIVE_VIEWS.has(snapshot.activeLiveView)) activeLiveView = snapshot.activeLiveView;
     const target = Math.max(0, Number(snapshot.scroll) || 0);
     uiScrollPositions[desiredTab] = target;
@@ -750,7 +752,7 @@ function humanizeError(error) {
         DB.unsubscribe();
         state = Engine.createDefaultState();
         showUnavailable('Torneo non disponibile: controlla la chiave e i permessi di accesso.');
-        if (!quiet) setConnectionStatus(online.session ? 'Autenticato' : 'Login richiesto');
+        setConnectionStatus(isPublicView() ? 'Torneo non disponibile' : (online.session ? 'Crea o apri torneo' : 'Login richiesto'));
         renderAll();
         return false;
       }
@@ -835,6 +837,7 @@ async function initializeOnline() {
       return;
     }
     try {
+      setConnectionStatus('Connessione…');
       DB.init();
       online.session = await DB.getSession();
       online.authReady = true;
@@ -866,6 +869,8 @@ async function initializeOnline() {
   }
 
   function switchTab(tabId, options = {}) {
+    if (isPublicView()) tabId = 'live';
+    else if (online.configured && online.authReady && !online.session) tabId = 'more';
     if (!$(tabId) || !VALID_TABS.has(tabId)) return;
     const { restore = true, updateUrl = true, persist = true } = options;
     if (activeTab && activeTab !== tabId) rememberCurrentScroll();
@@ -1258,8 +1263,10 @@ async function initializeOnline() {
     $('bulkImportPanel').classList.toggle('hidden', locked || !editable);
     $('loadDefaultsBtn').disabled = locked || !editable;
     $('clearTeamsBtn').disabled = locked || !editable;
+    if ($('clearBulkBtn')) $('clearBulkBtn').disabled = locked || !editable;
     $('loadDefaultsBtn').classList.toggle('hidden',locked || !editable);
     $('clearTeamsBtn').classList.toggle('hidden',locked || !editable);
+    $('clearBulkBtn')?.classList.toggle('hidden',locked || !editable);
     body.innerHTML = state.teams.map((item,index) => {
       if ((locked && !item.name.trim()) || (query && !item.name.toLocaleLowerCase('it').includes(query))) return '';
       const status = item.name.trim() ? (item.seed ? `TS ${item.seed}` : 'Iscritta') : 'Disponibile';
@@ -1478,6 +1485,14 @@ async function initializeOnline() {
     showToast(`Template caricato: sostituisci i nomi e premi “Carica squadre”.${suffix}`, state.matches.length ? 'info' : 'success');
   }
 
+  function clearBulkTeamsDraft() {
+    clearTimeout(window.__bulkPreviewTimer);
+    $('bulkTeamsInput').value = '';
+    $('bulkUseNumbersAsSeeds').checked = false;
+    renderBulkPreview();
+    showToast('Box e anteprima svuotati.', 'success');
+  }
+
   function renderBulkPreview() {
     const textarea = $('bulkTeamsInput');
     const list = $('bulkPreviewList');
@@ -1488,7 +1503,7 @@ async function initializeOnline() {
     count.textContent = `${parsed.length} ${parsed.length === 1 ? 'coppia' : 'coppie'}`;
     $('bulkApplyBtn').disabled = !parsed.length || Boolean(parsed.issues.length) || tournamentStarted() || !canEdit();
     if (!parsed.length) {
-      list.innerHTML = '<p>Nessuna coppia riconosciuta.</p>';
+      list.innerHTML = textarea.value.trim() ? '<p>Nessuna coppia riconosciuta.</p>' : '<p>Incolla un elenco o carica un esempio.</p>';
       return parsed;
     }
     list.innerHTML = (parsed.issues.length ? `<p class="invalid-score">${parsed.issues.slice(0,8).map(escapeHtml).join('<br>')}</p>` : '') + parsed.slice(0, 24).map((item, index) => {
@@ -2081,6 +2096,7 @@ async function initializeOnline() {
       await refreshAdminList({ quiet: true });
       renderAll();
       switchTab('dashboard');
+      setConnectionStatus('Online', 'online');
       showToast('Torneo online attivato. Ora puoi abilitare e condividere il link Live.', 'success');
     } catch (error) { showToast(humanizeError(error), 'error'); }
   }
@@ -2349,12 +2365,19 @@ async function initializeOnline() {
     $('dayStartInput').addEventListener('change', (event) => { state.settings.dayStart = event.target.value || '08:45'; noteLocalEdit({ wholeState: true, delay: 250 }); renderDashboard(); updateSetupDerived(); });
     $('dayEndInput').addEventListener('change', (event) => { state.settings.dayEnd = event.target.value || '18:00'; noteLocalEdit({ wholeState: true, delay: 250 }); renderDashboard(); updateSetupDerived(); });
     $('loadDefaultsBtn').addEventListener('click', loadExampleTeamsTemplate);
+    $('clearBulkBtn')?.addEventListener('click', clearBulkTeamsDraft);
     $('clearTeamsBtn').addEventListener('click', async () => {
-      if (!ensureEditable() || state.matches.length) return;
-      const confirmed = await confirmAction('Svuotare l’elenco coppie?', 'Nomi e teste di serie verranno cancellati.', 'Svuota');
+      // Compatibility when an older index.html is still cached during deployment.
+      if (!$('clearBulkBtn')) { clearBulkTeamsDraft(); return; }
+      if (!ensureRosterEditable()) return;
+      if (!state.teams.some(item => item.name.trim() || item.seed || item.manualGroup)) { showToast('L’elenco squadre è già vuoto.'); return; }
+      const before = state, editVersion = localEditVersion;
+      const confirmed = await confirmAction('Svuotare le squadre iscritte?', 'Verranno cancellati i nomi, le teste di serie e le assegnazioni manuali delle squadre caricate nel torneo.', 'Svuota squadre');
       if (!confirmed) return;
-      state.teams.forEach((item) => { item.name = ''; item.seed = null; item.manualGroup = null; });
-      markChanged({ render: true });
+      if (!canEdit() || tournamentStarted() || state !== before || localEditVersion !== editVersion) { showToast('Il torneo è cambiato. Ricontrolla le squadre prima di svuotare.', 'error'); return; }
+      state.teams.forEach((item) => { item.name = ''; item.seed = null; item.manualGroup = null; item.updatedAt = new Date().toISOString(); });
+      markChanged({ render: true, immediate: true });
+      showToast('Squadre iscritte svuotate.', 'success');
     });
     $('bulkPreviewBtn')?.addEventListener('click', renderBulkPreview);
     $('bulkApplyBtn')?.addEventListener('click', applyBulkTeams);
@@ -2393,6 +2416,7 @@ async function initializeOnline() {
       online.savePaused = false; remoteConflict = null; pendingRealtimeRow = null;
       scoreDrafts.clear(); clearDirtyTracking(localEditVersion); hideSaveProblem(); showUnavailable('');
       setTournamentKeyInUrl(key); state = Engine.createDefaultState();
+      setConnectionStatus('Crea o apri torneo');
       renderAll(); switchTab('more'); $('onlineTournamentName').focus();
     });
     $('signOutBtn').addEventListener('click', async () => {
