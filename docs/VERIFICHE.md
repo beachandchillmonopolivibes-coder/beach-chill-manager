@@ -2,6 +2,10 @@
 
 Data: 22 ottobre 2026.
 
+## Correzione aggiuntiva dell’indicatore di connessione
+
+Il badge iniziale poteva restare su “Locale” anche con Supabase configurato quando non era ancora stato caricato un torneo; inoltre la creazione non lo aggiornava subito. Ora mostra “Connessione…”, “Login richiesto”, “Crea o apri torneo”, “Torneo non disponibile” o “Online” secondo il caso. “Locale” è riservato alla modalità senza configurazione Supabase. È stato corretto anche il ripristino della scheda precedente: quando serve il login rimane visibile la pagina di accesso, anche dopo il ritorno all’app. Per applicare questa correzione al sito già pubblicato basta sostituire `app.js` con quello di questo pacchetto e attendere il nuovo deployment. Non occorrono migrazioni SQL.
+
 ## Problemi corretti
 
 - Importazione di backup con gare o partecipanti inesistenti: verifica completa prima di sostituire lo stato e attivare il blocco del torneo.
@@ -23,7 +27,7 @@ Data: 22 ottobre 2026.
 ## Esito finale
 
 - **38/38 test automatici** superati (motore, database, configurazione/build e contratti dell’interfaccia).
-- **10/10 scenari browser** superati su Chromium 153, desktop e smartphone simulato.
+- **14/14 scenari browser** superati su Chromium 153, desktop e smartphone simulato.
 - **930 simulazioni complete di torneo**, comprese nella suite del motore, e controllo dei backup generati.
 - Build locale e build con configurazione di produzione validate.
 - Layout delle squadre e dei punteggi verificato visivamente in tema chiaro e scuro.

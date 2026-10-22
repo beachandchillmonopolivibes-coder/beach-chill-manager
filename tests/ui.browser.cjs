@@ -48,7 +48,7 @@ function stateWithTeams(start = false) {
   if (start) Engine.generateTournament(state, { drawCode: 'QA-2026' });
   return JSON.parse(JSON.stringify(state));
 }
-async function newPage({ state, mobile = false, unavailable = false, conflict = false } = {}) {
+async function newPage({ state, mobile = false, unavailable = false, conflict = false, connection = null } = {}) {
   const context = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 }, serviceWorkers: 'block' });
   const page = await context.newPage();
   page.setDefaultTimeout(7000);
@@ -57,6 +57,12 @@ async function newPage({ state, mobile = false, unavailable = false, conflict = 
   await page.route('**/*', route => {
     if (!route.request().url().startsWith(base + '/')) return route.abort();
     if (/\/config\.js(?:\?|$)/.test(route.request().url())) return route.fulfill({ contentType: 'text/javascript', body: 'window.BEACH_APP_CONFIG={supabaseUrl:"",supabasePublishableKey:"",defaultTournamentSlug:"qa-tournament"};' });
+    if (connection && /\/db\.js(?:\?|$)/.test(route.request().url())) return route.fulfill({ contentType:'text/javascript',body:`
+      window.__mockSession=${JSON.stringify(connection.signedIn ? {user:{id:'qa-admin-id',email:'admin@admin.beachvolley.app'}} : null)};
+      window.__mockRow=${JSON.stringify(connection.existing ? {id:'qa-tournament-id',slug:'qa-tournament',name:'QA Beach Tournament',public_read:true,state:stateWithTeams(false),revision:1,owner_id:'qa-admin-id',updated_at:'2026-10-22T10:00:00Z'} : null)};
+      window.__createdTournament=null;
+      window.BeachDB={isConfigured:()=>true,init:()=>null,getSession:async()=>window.__mockSession,onAuthStateChange:()=>({data:{subscription:{unsubscribe(){}}}}),getMyRole:async()=>window.__mockSession?'owner':null,listTournamentAdmins:async()=>[],sessionUsername:()=>window.__mockSession?'admin':'',loadTournamentBySlug:async()=>structuredClone(window.__mockRow),subscribeToTournament(){},unsubscribe(){},createTournament:async(name,slug,state)=>{window.__createdTournament={name,slug,state:structuredClone(state)};window.__mockRow={id:'qa-created-id',slug,name,public_read:true,state:structuredClone(state),revision:0,owner_id:'qa-admin-id',updated_at:'2026-10-22T10:00:00Z'};return structuredClone(window.__mockRow);}};
+    ` });
     if (conflict && /\/db\.js(?:\?|$)/.test(route.request().url())) return route.fulfill({ contentType: 'text/javascript', body: `
       window.__initialRow=${JSON.stringify({id:'qa-tournament-id',slug:'qa-tournament',name:'QA Beach Tournament',public_read:true,state:stateWithTeams(true),revision:1,owner_id:'qa-admin-id',updated_at:'2026-10-22T10:00:00Z'})};
       window.__row=JSON.parse(sessionStorage.getItem('qa-server-row')||'null')||window.__initialRow;
@@ -302,6 +308,57 @@ test('Backup incoerente: un riferimento a una coppia inesistente viene rifiutato
     assert.equal(Boolean((await currentState(page)).metadata.startedAt),false,'un backup incoerente non avvia né blocca il torneo');
     await page.locator('[data-tab=teams]').click();
     assert.equal(await page.locator('#clearTeamsBtn').isEnabled(),true);
+    await expectNoErrors(page);
+  } finally {await context.close();}
+});
+
+test('Connessione: solo la modalità dimostrativa senza configurazione mostra Locale', async () => {
+  const {context,page}=await newPage();
+  try {
+    await page.goto(`${base}/?t=qa-tournament`);
+    await settle(page);
+    assert.equal((await page.locator('#connectionStatus span:last-child').innerText()).trim(),'Locale');
+    await expectNoErrors(page);
+  } finally {await context.close();}
+});
+
+test('Connessione: Supabase configurato senza sessione e senza torneo mostra Login richiesto', async () => {
+  const {context,page}=await newPage({connection:{signedIn:false,existing:false}});
+  try {
+    await page.goto(`${base}/?t=qa-tournament`);
+    await page.waitForFunction(()=>document.querySelector('#connectionStatus span:last-child')?.textContent.trim()==='Login richiesto');
+    await page.locator('#adminLoginPanel').waitFor({state:'visible'});
+    await page.waitForTimeout(500);
+    assert.equal(await page.locator('#adminLoginPanel').isVisible(),true);
+    assert.equal((await page.locator('#connectionStatus span:last-child').innerText()).trim(),'Login richiesto');
+    await expectNoErrors(page);
+  } finally {await context.close();}
+});
+
+test('Connessione: sessione valida senza torneo invita a crearlo e dopo la creazione mostra Online', async () => {
+  const {context,page}=await newPage({connection:{signedIn:true,existing:false}});
+  try {
+    await page.goto(`${base}/?t=qa-tournament&open=more`);
+    await page.waitForFunction(()=>document.querySelector('#connectionStatus span:last-child')?.textContent.trim()==='Crea o apri torneo');
+    assert.equal(await page.locator('#tournamentCreatePanel').isVisible(),true);
+    await page.locator('#onlineTournamentName').fill('Nuovo Beach Tournament');
+    await page.locator('#onlineTournamentSlug').fill('qa-created');
+    await page.locator('#createOnlineBtn').click();
+    await page.waitForFunction(()=>document.querySelector('#connectionStatus span:last-child')?.textContent.trim()==='Online');
+    assert.equal((await page.locator('#connectionStatus span:last-child').innerText()).trim(),'Online');
+    assert.equal(new URL(page.url()).searchParams.get('t'),'qa-created');
+    assert.deepEqual(await page.evaluate(()=>({name:window.__createdTournament?.name,slug:window.__createdTournament?.slug})),{name:'Nuovo Beach Tournament',slug:'qa-created'});
+    await expectNoErrors(page);
+  } finally {await context.close();}
+});
+
+test('Connessione: un torneo esistente caricato da Supabase mostra Online', async () => {
+  const {context,page}=await newPage({connection:{signedIn:true,existing:true}});
+  try {
+    await page.goto(`${base}/?t=qa-tournament`);
+    await page.waitForFunction(()=>document.querySelector('#connectionStatus span:last-child')?.textContent.trim()==='Online');
+    assert.equal((await page.locator('#connectionStatus span:last-child').innerText()).trim(),'Online');
+    assert.equal(await page.locator('#appTitle').innerText(),'QA Beach Tournament');
     await expectNoErrors(page);
   } finally {await context.close();}
 });
