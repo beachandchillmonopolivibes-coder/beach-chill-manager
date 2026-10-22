@@ -1,8 +1,10 @@
-# Beach & Chill · Glow Arena 13
+# Beach & Chill · Glow Arena 13.1
 
 Applicazione web responsive per organizzare tornei di beach volley, gestire squadre e risultati e condividere la vista Live con i giocatori. Frontend statico su Vercel; autenticazione, database e aggiornamenti su Supabase.
 
 ## Parti da qui
+
+La **13.1 corregge la persistenza delle modifiche** e aggiunge un comando di salvataggio esplicito. Leggi **[Correzione salvataggi e aggiornamento](docs/CORREZIONE_SALVATAGGI_V13_1.md)** per aggiornare il sito e distinguere salvataggio locale, sincronizzazione online e bozze dei punteggi.
 
 Se aggiorni una versione 11 o 12 già online, segui **[Aggiornare il layout Glow Arena 13](docs/AGGIORNAMENTO_LAYOUT_V13.md)**. Per questo restyling non servono migrazioni SQL o nuovi amministratori.
 

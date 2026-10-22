@@ -46,6 +46,8 @@
   let manualBoardRenderTimer = null;
   let dirtyWholeState = false;
   const scoreDrafts = new Map();
+  let setupDraftForm = { name: null, slug: null };
+  let localPersistenceError = false;
   let remoteConflict = null;
   let onlineRequest = 0;
   let loginInProgress = false;
@@ -61,6 +63,7 @@
     role: null,
     revision: null,
     saving: false,
+    creating: false,
     admins: [],
     accessReady: false,
     savePaused: false,
@@ -407,13 +410,59 @@
     return Engine.createDefaultState();
   }
 
+  function setupDraftKey() {
+    return `${LOCAL_PREFIX}:setup:${encodeURIComponent(CONFIG.supabaseUrl || 'configured')}:${tournamentSlug()}:${online.session?.user?.id || ''}`;
+  }
+
+  function readSetupDraft() {
+    if (!online.configured || !online.session || isPublicView()) return null;
+    try {
+      const draft = JSON.parse(localStorage.getItem(setupDraftKey()) || 'null');
+      if (draft?.userId !== online.session.user.id || draft?.slug !== tournamentSlug() || !draft.state) return null;
+      return { state: Engine.normalizeState(draft.state), form: draft.form || {} };
+    } catch (_) { return null; }
+  }
+
+  function renderSaveStatus() {
+    const bar = $('saveStatusBar');
+    if (!bar) return;
+    bar.classList.toggle('hidden', !canEdit());
+    const button = $('saveNowBtn');
+    let message;
+    if (localPersistenceError && online.tournament && !hasUnsavedLocalChanges()) message = 'Salvato online. La copia locale non è disponibile su questo dispositivo.';
+    else if (localPersistenceError) message = 'Salvataggio sul dispositivo non riuscito: esporta un backup prima di chiudere.';
+    else if (online.creating) message = 'Attivazione online in corso. Le nuove modifiche verranno sincronizzate.';
+    else if (scoreDrafts.size) message = `${scoreDrafts.size} ${scoreDrafts.size === 1 ? 'punteggio in bozza' : 'punteggi in bozza'}: conferma ogni gara con “Salva punteggio”.`;
+    else if (online.savePaused) message = 'Sincronizzazione sospesa: risolvi il conflitto indicato sotto.';
+    else if (online.saving) message = 'Salvataggio online in corso…';
+    else if (hasUnsavedLocalChanges() && online.tournament) message = 'Modifiche salvate sul dispositivo, da sincronizzare online.';
+    else if (online.tournament) message = 'Tutte le modifiche sono salvate online.';
+    else if (online.configured) message = 'Bozza salvata sul dispositivo. Attiva il torneo online per condividerla.';
+    else message = 'Salvataggio automatico su questo dispositivo.';
+    $('saveStatusText').textContent = message;
+    bar.classList.toggle('save-error', localPersistenceError || online.savePaused);
+    bar.classList.toggle('save-pending', Boolean(scoreDrafts.size || online.saving || online.creating || hasUnsavedLocalChanges()));
+    if (button) button.disabled = online.saving || online.creating || Boolean(scoreDrafts.size);
+  }
+
   function saveLocalState() {
     try {
-      if (online.configured && !canEdit()) return;
-      localStorage.setItem(localKey(), JSON.stringify(state));
-      if (online.tournament && online.session) localStorage.setItem(`${localKey()}:draft`, JSON.stringify({state, baseRevision:draftBaseRevision ?? online.revision,tournamentId:online.tournament.id,userId:online.session.user?.id,pending:hasUnsavedLocalChanges(),savedAt:new Date().toISOString()}));
+      if (online.configured && !canEdit()) return false;
+      if (online.configured && online.session && !online.tournament) {
+        localStorage.setItem(setupDraftKey(), JSON.stringify({state,form:setupDraftForm,userId:online.session.user.id,slug:tournamentSlug(),savedAt:new Date().toISOString()}));
+      } else {
+        localStorage.setItem(localKey(), JSON.stringify(state));
+        if (online.tournament && online.session) localStorage.setItem(`${localKey()}:draft`, JSON.stringify({state, baseRevision:draftBaseRevision ?? online.revision,tournamentId:online.tournament.id,userId:online.session.user?.id,pending:hasUnsavedLocalChanges(),savedAt:new Date().toISOString()}));
+      }
+      localPersistenceError = false;
+      if (!online.tournament && !online.creating) clearDirtyTracking(localEditVersion);
+      renderSaveStatus();
+      return true;
     } catch (error) {
+      localPersistenceError = true;
       console.warn('Salvataggio locale non disponibile:', error);
+      renderSaveStatus();
+      return false;
     }
   }
 
@@ -442,8 +491,8 @@ function noteLocalEdit({ teamIndex = null, matchId = null, wholeState = false, d
   if (matchId) dirtyMatchIds.add(String(matchId));
   if (wholeState) dirtyWholeState = true;
   state.metadata.updatedAt = new Date().toISOString();
-  saveLocalState();
-  if (online.tournament) setConnectionStatus('Bozza salvata…');
+  const stored = saveLocalState();
+  if (online.tournament) setConnectionStatus(stored ? 'Bozza salvata…' : 'Da sincronizzare…', stored ? '' : 'error');
   scheduleOnlineSave(delay);
 }
 
@@ -578,6 +627,7 @@ function scheduleManualBoardRender() {
     element.className = `connection-chip ${mode}`.trim();
     const label = element.querySelector('span:last-child');
     if (label) label.textContent = text;
+    renderSaveStatus();
   }
 
   function preferredTheme() {
@@ -670,6 +720,8 @@ async function flushOnlineSave() {
   setConnectionStatus('Salvataggio…');
   let saveVersion = localEditVersion;
   let snapshot = cloneValue(state);
+  const savingId = online.tournament.id;
+  const savingUser = online.session?.user?.id;
   try {
     let row;
     try {
@@ -684,6 +736,7 @@ async function flushOnlineSave() {
       return;
     }
 
+    if (online.tournament?.id !== savingId || online.session?.user?.id !== savingUser) return;
     online.tournament = row;
     online.revision = Number(row.revision);
     clearDirtyTracking(saveVersion);
@@ -700,6 +753,7 @@ async function flushOnlineSave() {
     showSaveProblem('Le modifiche restano in questo browser e non sono ancora online. Controlla la connessione e riprova.', false);
   } finally {
     online.saving = false;
+    renderSaveStatus();
     if (!hasUnsavedLocalChanges()) {
       applyPendingRealtimeIfSafe();
       if (pendingRemoteRefresh && !isEditableControl()) refreshOnlineIfSafe();
@@ -742,7 +796,8 @@ function humanizeError(error) {
 
   async function loadOnlineTournament({ quiet = false, force = false } = {}) {
     if (!online.configured) return false;
-    if (!force && online.tournament && (isEditableControl() || scoreDrafts.size || hasUnsavedLocalChanges() || online.saving)) {
+    if (online.creating) return false;
+    if (!force && online.accessReady && (isEditableControl() || scoreDrafts.size || hasUnsavedLocalChanges() || online.saving)) {
       pendingRemoteRefresh = true;
       return false;
     }
@@ -758,7 +813,10 @@ function humanizeError(error) {
         online.revision = null;
         online.admins = [];
         DB.unsubscribe();
-        state = Engine.createDefaultState();
+        const savedSetup = readSetupDraft();
+        state = savedSetup?.state || Engine.createDefaultState();
+        setupDraftForm = { name: savedSetup?.form?.name ?? null, slug: savedSetup?.form?.slug ?? null };
+        clearDirtyTracking(localEditVersion);
         showUnavailable('Torneo non disponibile: controlla la chiave e i permessi di accesso.');
         setConnectionStatus(isPublicView() ? 'Torneo non disponibile' : (online.session ? 'Crea o apri torneo' : 'Login richiesto'));
         renderAll();
@@ -794,13 +852,13 @@ function humanizeError(error) {
         state.metadata.migrationNeedsSave = false;
         state.metadata.updatedAt = new Date().toISOString();
       }
-      saveLocalState();
       if (!restoredDraft) {
         lastSavedEditVersion = localEditVersion;
         dirtyWholeState = false;
         dirtyTeamIndexes.clear();
         dirtyMatchIds.clear();
       }
+      saveLocalState();
       pendingRemoteRefresh = false;
       DB.subscribeToTournament(row.id, handleRealtimeUpdate);
       setConnectionStatus(online.savePaused ? 'Conflitto da risolvere' : (restoredDraft ? 'Bozza recuperata…' : 'Online'), online.savePaused ? 'error' : 'online');
@@ -919,6 +977,7 @@ async function initializeOnline() {
     renderMatches();
     renderLive();
     updateOnlinePanel();
+    renderSaveStatus();
     $('demoNotice').classList.toggle('hidden', online.configured);
     $('demoNotice').textContent = isPublicView() ? 'Anteprima locale · questi dati sono visibili solo in questo browser. Configura Supabase per un Live condiviso.' : 'Modalità locale · i dati restano in questo browser. Configura Supabase per condividere il torneo e abilitare gli admin.';
     restoreUiControls();
@@ -1318,9 +1377,13 @@ async function initializeOnline() {
         if (!ensureEditable()) return;
         const value = event.target.value;
         if (locked && (!value.trim() || state.teams.some((item,i)=>i!==index && item.name.trim().toLocaleLowerCase('it')===value.trim().toLocaleLowerCase('it')))) {
-          event.target.value = state.teams[index].name;
-          showToast('Usa un nome non vuoto e diverso dalle altre coppie.', 'error'); return;
+          if (event.type === 'change') {
+            event.target.value = state.teams[index].name;
+            showToast('Usa un nome non vuoto e diverso dalle altre coppie.', 'error');
+          }
+          return;
         }
+        if (state.teams[index].name === value) return;
         state.teams[index].name = value;
         state.teams[index].updatedAt = new Date().toISOString();
         updateRowStatus(row,state.teams[index]);
@@ -1329,7 +1392,8 @@ async function initializeOnline() {
         if (!locked) { scheduleManualBoardRender(); updateSetupDerived(); }
         renderHeader(); renderDashboard(); renderLive();
       };
-      name.addEventListener(locked ? 'change' : 'input',updateName);
+      name.addEventListener('input',updateName);
+      if (locked) name.addEventListener('change',updateName);
       row.querySelector('.seed-input').addEventListener('change',(event)=>{
         if (!ensureRosterEditable()) return;
         const value = event.target.value.trim();
@@ -1816,6 +1880,7 @@ async function initializeOnline() {
         $('advanceBtn').disabled = true;
         draftStatus.textContent='Modifiche da salvare · premi Salva punteggio';
         draftStatus.classList.remove('invalid-score');
+        renderSaveStatus();
       });
     });
     updateMatchCardResult(card,match);
@@ -1992,8 +2057,8 @@ async function initializeOnline() {
 
     const loginKeyInput = $('adminTournamentKey');
     if (loginKeyInput && document.activeElement !== loginKeyInput) loginKeyInput.value = key;
-    if (document.activeElement !== $('onlineTournamentName')) $('onlineTournamentName').value = state.settings.tournamentName;
-    if (document.activeElement !== $('onlineTournamentSlug')) $('onlineTournamentSlug').value = key;
+    if (document.activeElement !== $('onlineTournamentName')) $('onlineTournamentName').value = !online.tournament && setupDraftForm.name !== null ? setupDraftForm.name : state.settings.tournamentName;
+    if (document.activeElement !== $('onlineTournamentSlug')) $('onlineTournamentSlug').value = !online.tournament && setupDraftForm.slug !== null ? setupDraftForm.slug : key;
     if ($('publicTournamentKey')) $('publicTournamentKey').textContent = key;
     if ($('publicTournamentKeyField')) $('publicTournamentKeyField').value = key;
 
@@ -2006,7 +2071,10 @@ async function initializeOnline() {
           : 'Supabase non configurato';
 
     createPanel?.classList.toggle('hidden', !configured || !online.session || !online.accessReady || Boolean(online.tournament));
-    $('createOnlineBtn').disabled = !configured || !online.session || !online.accessReady || Boolean(online.tournament);
+    $('createOnlineBtn').disabled = !configured || !online.session || !online.accessReady || Boolean(online.tournament) || online.creating;
+    $('onlineTournamentName').disabled = online.creating;
+    $('onlineTournamentSlug').disabled = online.creating;
+    $('generateTournamentKeyBtn').disabled = online.creating;
     $('sharePanel').classList.toggle('hidden', !online.tournament);
     adminManagement?.classList.toggle('hidden', !online.tournament || !isOwner());
     $('publicInfoBox')?.classList.toggle('hidden', !online.tournament);
@@ -2091,7 +2159,7 @@ async function initializeOnline() {
     try {
       loginInProgress = true;
       $('adminLoginBtn').disabled = true;
-      if (online.saving) throw new Error('Attendi il completamento del salvataggio.');
+      if (online.saving || online.creating) throw new Error('Attendi il completamento del salvataggio.');
       if (key !== tournamentSlug()) {
         if (hasUnsavedLocalChanges() || scoreDrafts.size) { showToast('Esporta e risolvi la bozza prima di cambiare torneo.', 'error'); return; }
         clearTimeout(saveTimer); DB.unsubscribe(); onlineRequest += 1;
@@ -2116,26 +2184,42 @@ async function initializeOnline() {
 
   async function createOnlineTournament() {
     if (!online.session || !online.accessReady) { showToast('Accedi e attendi la connessione prima di creare un torneo.', 'error'); return; }
-    if (online.saving || hasUnsavedLocalChanges() && online.tournament) { showToast('Completa il salvataggio prima di creare un altro torneo.', 'error'); return; }
+    if (online.creating || online.saving || hasUnsavedLocalChanges() && online.tournament) { showToast('Completa il salvataggio prima di creare un altro torneo.', 'error'); return; }
     const name = $('onlineTournamentName').value.trim();
     const slug = normalizeTournamentKey($('onlineTournamentSlug').value);
     if (!name || !slug) { showToast('Compila nome e chiave torneo.', 'error'); return; }
+    const draftKey = setupDraftKey();
+    const creatingUser = online.session.user.id;
+    online.creating = true;
+    onlineRequest += 1;
+    $('createOnlineBtn').disabled = true;
+    updateOnlinePanel();
     try {
       state.settings.tournamentName = name;
-      const row = await DB.createTournament(name, slug, state);
+      saveLocalState();
+      const createVersion = localEditVersion;
+      const snapshot = cloneValue(state);
+      renderSaveStatus();
+      const row = await DB.createTournament(name, slug, snapshot);
+      if (online.session?.user?.id !== creatingUser) return;
       online.tournament = row;
       online.revision = Number(row.revision);
       online.role = 'owner'; online.accessReady = true;
-      clearDirtyTracking(localEditVersion);
+      showUnavailable('');
+      clearDirtyTracking(createVersion);
       setTournamentKeyInUrl(slug);
+      setupDraftForm = { name: null, slug: null };
       saveLocalState();
+      try { localStorage.removeItem(draftKey); } catch (_) {}
+      if (hasUnsavedLocalChanges()) scheduleOnlineSave(0);
       DB.subscribeToTournament(row.id, handleRealtimeUpdate);
       await refreshAdminList({ quiet: true });
       renderAll();
       switchTab('dashboard');
-      setConnectionStatus('Online', 'online');
+      setConnectionStatus(hasUnsavedLocalChanges() ? 'Sincronizzazione…' : 'Online', 'online');
       showToast('Torneo online attivato. Ora puoi abilitare e condividere il link Live.', 'success');
     } catch (error) { showToast(humanizeError(error), 'error'); }
+    finally { online.creating = false; updateOnlinePanel(); renderSaveStatus(); }
   }
 
   async function addAdministrator() {
@@ -2288,6 +2372,14 @@ async function initializeOnline() {
     $('exportConflictBtn').addEventListener('click',exportBackup);
     $('reloadRemoteBtn').addEventListener('click',discardDraftAndReload);
     $('retrySaveBtn').addEventListener('click',()=>flushOnlineSave());
+    $('saveNowBtn')?.addEventListener('click', async () => {
+      if (!ensureEditable()) return;
+      if (isEditableControl()) document.activeElement.blur();
+      const stored = saveLocalState();
+      if (online.tournament && hasUnsavedLocalChanges()) await flushOnlineSave();
+      renderSaveStatus();
+      if (!scoreDrafts.size && !hasUnsavedLocalChanges() && !online.savePaused && stored) showToast(online.tournament ? 'Modifiche salvate online.' : 'Modifiche salvate su questo dispositivo.', 'success');
+    });
     const structureIds=new Set(['groupCountInput','playoffSizeInput','protectGroupWinnersInput','groupAssignmentModeInput','silverEnabledInput','silverSizeInput','groupMatchRuleInput','quarterMatchRuleInput','semifinalMatchRuleInput','eliminationMatchRuleInput','tournamentNameInput','courtsInput','slotMinutesInput','eventDateInput','dayStartInput','dayEndInput','drawCodeInput']);
     for (const type of ['input','change']) document.addEventListener(type,(event)=>{
       if(structureIds.has(event.target.id) && (!canEdit() || tournamentStarted())) {event.stopImmediatePropagation();event.preventDefault();}
@@ -2396,6 +2488,28 @@ async function initializeOnline() {
     $('semifinalMatchRuleInput').addEventListener('change', (event) => { state.settings.formatOptions.semifinalMatchRule = event.target.value; saveLocalState(); updateSetupDerived(); renderDashboard(); });
     $('eliminationMatchRuleInput').addEventListener('change', (event) => { state.settings.formatOptions.eliminationMatchRule = event.target.value; saveLocalState(); updateSetupDerived(); renderDashboard(); });
     $('tournamentNameInput').addEventListener('input', (event) => { state.settings.tournamentName = event.target.value; noteLocalEdit({ wholeState: true, delay: 900 }); renderHeader(); });
+    $('drawCodeInput').addEventListener('input', (event) => {
+      if (!canEdit() || tournamentStarted()) return;
+      state.settings.draw.code = event.target.value;
+      noteLocalEdit({wholeState:true,delay:500});
+    });
+    const liveSettings = {
+      courtsInput: ['courts', 1, 12], slotMinutesInput: ['slotMinutes', 20, 120],
+      eventDateInput: ['eventDate'], dayStartInput: ['dayStart'], dayEndInput: ['dayEnd'],
+    };
+    for (const [id, [key, min, max]] of Object.entries(liveSettings)) $(id).addEventListener('input', (event) => {
+      if (!canEdit() || tournamentStarted()) return;
+      let value = event.target.value;
+      if (min !== undefined) {
+        if (!value.trim()) return;
+        value = Number(value);
+        if (!Number.isInteger(value) || value < min || value > max) return;
+      } else if (key !== 'eventDate' && !/^\d{2}:\d{2}$/.test(value)) return;
+      if (event.target.validity && !event.target.validity.valid) return;
+      if (state.settings[key] === value) return;
+      state.settings[key] = value;
+      noteLocalEdit({wholeState:true,delay:500}); renderDashboard(); updateSetupDerived();
+    });
     $('courtsInput').addEventListener('change', (event) => { state.settings.courts = Math.max(1, Math.min(12, Number(event.target.value) || 1)); noteLocalEdit({ wholeState: true, delay: 250 }); renderDashboard(); updateSetupDerived(); });
     $('slotMinutesInput').addEventListener('change', (event) => { state.settings.slotMinutes = Math.max(20, Math.min(120, Number(event.target.value) || 45)); noteLocalEdit({ wholeState: true, delay: 250 }); renderDashboard(); updateSetupDerived(); });
     $('eventDateInput').addEventListener('change', (event) => { state.settings.eventDate = event.target.value || ''; noteLocalEdit({ wholeState: true, delay: 250 }); renderDashboard(); updateSetupDerived(); });
@@ -2443,7 +2557,7 @@ async function initializeOnline() {
       $('toggleAdminPasswordBtn').setAttribute('aria-label', reveal ? 'Nascondi password' : 'Mostra password');
     });
     $('newTournamentBtn').addEventListener('click',async()=>{
-      if (!online.session || online.saving) return;
+      if (!online.session || online.saving || online.creating) return;
       if (scoreDrafts.size || hasUnsavedLocalChanges()) { showToast('Salva o risolvi le modifiche in sospeso prima di aprire un nuovo torneo.', 'error'); return; }
       const confirmed = await confirmAction('Preparare un nuovo torneo?', 'Si aprirà una nuova scheda evento con iscrizioni vuote. Scegli nome e chiave, poi premi Attiva torneo online.', 'Prepara torneo');
       if (!confirmed) return;
@@ -2453,10 +2567,13 @@ async function initializeOnline() {
       online.savePaused = false; remoteConflict = null; pendingRealtimeRow = null;
       scoreDrafts.clear(); clearDirtyTracking(localEditVersion); hideSaveProblem(); showUnavailable('');
       setTournamentKeyInUrl(key); state = Engine.createDefaultState();
+      setupDraftForm = { name: null, slug: null };
+      saveLocalState();
       setConnectionStatus('Crea o apri torneo');
       renderAll(); switchTab('more'); $('onlineTournamentName').focus();
     });
     $('signOutBtn').addEventListener('click', async () => {
+      if (online.creating) { showToast('Attendi l’attivazione del torneo prima di uscire.', 'error'); return; }
       if (scoreDrafts.size) { showToast('Salva i punteggi modificati prima di uscire.', 'error'); return; }
       if (hasUnsavedLocalChanges()) {
         await flushOnlineSave();
@@ -2472,9 +2589,11 @@ async function initializeOnline() {
     $('generateTournamentKeyBtn').addEventListener('click', () => {
       const key = generateTournamentKey();
       $('onlineTournamentSlug').value = key;
+      setupDraftForm.slug = key; saveLocalState();
       showToast('Chiave torneo generata.', 'success');
     });
-    $('onlineTournamentSlug').addEventListener('input', (event) => { event.target.value = normalizeTournamentKey(event.target.value); });
+    $('onlineTournamentSlug').addEventListener('input', (event) => { event.target.value = normalizeTournamentKey(event.target.value); setupDraftForm.slug = event.target.value; saveLocalState(); });
+    $('onlineTournamentName').addEventListener('input', (event) => { setupDraftForm.name = event.target.value; saveLocalState(); });
     $('createOnlineBtn').addEventListener('click', createOnlineTournament);
     $('addAdminBtn').addEventListener('click', addAdministrator);
     $('newAdminUsername').addEventListener('keydown', (event) => { if (event.key === 'Enter') addAdministrator(); });
@@ -2546,7 +2665,7 @@ async function initializeOnline() {
       }, 120);
     });
     window.addEventListener('beforeunload', (event) => {
-      if (scoreDrafts.size || (online.tournament && hasUnsavedLocalChanges())) { event.preventDefault(); event.returnValue = ''; }
+      if (scoreDrafts.size || hasUnsavedLocalChanges() || online.creating || (localPersistenceError && !online.tournament)) { event.preventDefault(); event.returnValue = ''; }
     });
     window.addEventListener('online', () => { if (hasUnsavedLocalChanges() && !online.savePaused) flushOnlineSave(); });
     window.addEventListener('pagehide', () => {

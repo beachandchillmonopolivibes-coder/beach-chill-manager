@@ -24,10 +24,10 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="style.css?v=13.0" />
-  <link rel="stylesheet" href="hmi-v10.css?v=13.0" />
-  <link rel="stylesheet" href="professional.css?v=13.0" />
-  <link rel="stylesheet" href="arena.css?v=13.0" />
+  <link rel="stylesheet" href="style.css?v=13.1" />
+  <link rel="stylesheet" href="hmi-v10.css?v=13.1" />
+  <link rel="stylesheet" href="professional.css?v=13.1" />
+  <link rel="stylesheet" href="arena.css?v=13.1" />
 </head>
 <body>
   <a class="skip-link" href="#mainContent">Vai al contenuto</a>
@@ -91,6 +91,7 @@
     <main id="mainContent" class="main-content">
       <div class="notice-banner hidden" id="demoNotice" role="status">Modalità locale · i dati restano in questo browser. Configura Supabase per condividere il torneo e abilitare gli admin.</div>
       <div class="notice-banner hidden" id="unavailableNotice" role="status"></div>
+      <div class="save-status-bar editor-only" id="saveStatusBar"><span class="save-status-copy" role="status" aria-live="polite"><i aria-hidden="true"></i><span id="saveStatusText">Verifica salvataggio…</span></span><button class="button secondary" id="saveNowBtn" type="button">Salva modifiche</button></div>
       <section class="card conflict-panel hidden" id="conflictPanel" role="alert"><h2>Salvataggio da verificare</h2><p id="conflictMessage"></p><div class="inline-actions"><button class="button secondary" id="exportConflictBtn" type="button">Scarica la mia bozza</button><button class="button primary" id="reloadRemoteBtn" type="button">Carica versione online</button><button class="button ghost" id="retrySaveBtn" type="button">Riprova salvataggio</button></div></section>
       <!-- DASHBOARD -->
       <section class="view active" id="dashboard" aria-labelledby="dashboardTitle">
@@ -557,11 +558,11 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="vendor/supabase.js?v=13.0"></script>
-  <script src="config.js?v=13.0"></script>
-  <script src="engine.js?v=13.0"></script>
-  <script src="db.js?v=13.0"></script>
-  <script src="app.js?v=13.0"></script>
+  <script src="vendor/supabase.js?v=13.1"></script>
+  <script src="config.js?v=13.1"></script>
+  <script src="engine.js?v=13.1"></script>
+  <script src="db.js?v=13.1"></script>
+  <script src="app.js?v=13.1"></script>
 
 
 </body>

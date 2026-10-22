@@ -159,6 +159,18 @@ html:root[data-theme] .view-heading h1 { font-size: clamp(28px, 3vw, 38px); lett
 .plan-metrics span, .plan-metrics strong { font-size: 12px; }
 .plan-metrics strong { font-weight: 700; }
 .notice-banner { border-radius: 10px; padding: 11px 15px; margin-bottom: 22px; font-size: 11px; line-height: 1.65; box-shadow: none; background: var(--warning-soft); border-color: color-mix(in srgb, var(--warning) 35%, var(--border)); color: var(--warning); }
+.save-status-bar { display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 10px 14px; margin: 0 0 22px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface); color: var(--muted); }
+.save-status-copy { display: flex; align-items: center; gap: 9px; font-size: 11px; line-height: 1.6; }
+.save-status-copy > i { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: var(--success); }
+.save-status-bar .button { min-height: 36px; padding: 7px 12px; font-size: 11px; white-space: nowrap; }
+.save-status-bar.save-pending .save-status-copy > i { background: var(--warning); }
+.save-status-bar.save-error { border-color: var(--danger); }
+.save-status-bar.save-error .save-status-copy > i { background: var(--danger); }
+@media (max-width: 720px) {
+ .save-status-bar { gap: 10px; padding: 10px; margin-bottom: 20px; }
+ .save-status-copy { font-size: 10px; gap: 7px; min-width: 0; }
+ .save-status-bar .button { padding: 8px 9px; font-size: 10px; min-height: 40px; }
+}
 html[data-theme="dark"] .notice-banner { background: #302b26; color: #e8cc9c; border-color: #66513d; }
 .setup-section { grid-template-columns: 34px minmax(0, 1fr); padding: 24px !important; gap: 16px; margin-bottom: 18px; }
 .section-number { width: 32px; height: 32px; border-radius: 10px; background: var(--primary-soft); color: var(--primary); font-weight: 850; box-shadow: none; }

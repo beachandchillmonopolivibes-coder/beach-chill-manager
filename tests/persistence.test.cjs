@@ -1,0 +1,305 @@
+'use strict';
+// Runs the application's real event and persistence code in an isolated VM.
+// Only painting, scrolling and browser startup are replaced by small adapters.
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const { webcrypto } = require('node:crypto');
+const root = path.resolve(__dirname, '..');
+const storageKey = 'beach-volley-manager-v6:persistence-qa';
+const setupIds = new Set(['tournamentNameInput', 'courtsInput', 'slotMinutesInput', 'eventDateInput', 'dayStartInput', 'dayEndInput', 'drawCodeInput']);
+const json = value => JSON.parse(JSON.stringify(value));
+
+class Storage {
+  constructor(values = new Map()) { this.values = values; }
+  getItem(key) { return this.values.get(key) ?? null; }
+  setItem(key, value) { this.values.set(key, String(value)); }
+  removeItem(key) { this.values.delete(key); }
+}
+
+class Element {
+  constructor(document, { id = '', tag = 'div', classes = '' } = {}) {
+    this.document = document; this.id = id; this.tagName = tag.toUpperCase();
+    this.className = classes; this.dataset = {}; this.value = ''; this.textContent = '';
+    this.disabled = false; this.readOnly = false; this.checked = false; this.options = [];
+    this.listeners = new Map(); this.children = new Map(); this.attributes = new Map();
+    const classesSet = new Set(classes.split(/\s+/).filter(Boolean));
+    this.classList = {
+      add: name => classesSet.add(name), remove: name => classesSet.delete(name),
+      contains: name => classesSet.has(name),
+      toggle: (name, force) => { const yes = force ?? !classesSet.has(name); yes ? classesSet.add(name) : classesSet.delete(name); return yes; },
+    };
+    this.style = { setProperty() {} };
+  }
+  addEventListener(type, listener) { const list = this.listeners.get(type) || []; list.push(listener); this.listeners.set(type, list); }
+  removeEventListener() {}
+  setAttribute(name, value) { this.attributes.set(name, String(value)); }
+  getAttribute(name) { return this.attributes.get(name) ?? null; }
+  removeAttribute(name) { this.attributes.delete(name); }
+  querySelector(selector) {
+    if (!this.children.has(selector)) {
+      const field = /(?:^|\s)\.(?:team-name-input|seed-input|a[123]|b[123]|court-input)$/.test(selector);
+      this.children.set(selector, new Element(this.document, { tag: field ? 'input' : 'div', classes: selector.replace(/^\./, '') }));
+    }
+    return this.children.get(selector);
+  }
+  querySelectorAll() { return []; }
+  closest(selector) { return selector === '#setup' && setupIds.has(this.id) ? this.document.getElementById('setup') : null; }
+  matches(selector) {
+    if (/input|select|textarea/.test(selector)) return ['INPUT', 'SELECT', 'TEXTAREA'].includes(this.tagName) && !this.disabled && !this.readOnly;
+    return selector.startsWith('.') && this.classList.contains(selector.slice(1));
+  }
+  focus() { this.document.activeElement = this; }
+  blur() { this.document.activeElement = null; }
+  scrollIntoView() {}
+  appendChild() {}
+  getBoundingClientRect() { return { x: 0, y: 0, top: 0, bottom: 48, left: 0, right: 300, width: 300, height: 48 }; }
+  async fire(type) {
+    const event = { type, target: this, preventDefault() {}, stopImmediatePropagation() {} };
+    for (const listener of this.document.listeners.get(type) || []) listener(event);
+    for (const listener of this.listeners.get(type) || []) await listener(event);
+  }
+  set innerHTML(html) {
+    this.html = html;
+    if (this.id !== 'teamRows') return;
+    const decode = text => text.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+    this.document.rows = Array.from(html.matchAll(/<tr data-team-index="(\d+)">[\s\S]*?<input class="team-name-input"[\s\S]*?value="([^"]*)"/g), match => {
+      const row = new Element(this.document, { tag: 'tr' }); row.dataset.teamIndex = match[1];
+      row.querySelector('.team-name-input').value = decode(match[2]);
+      return row;
+    });
+  }
+  get innerHTML() { return this.html || ''; }
+}
+
+function harness({ storage = new Storage(), configured = false, row = null, save, create, userId = 'admin-1', backend = 'https://qa.supabase.co' } = {}) {
+  const elements = new Map(), timers = new Map(); let timerId = 0;
+  const document = {
+    readyState: 'loading', activeElement: null, visibilityState: 'visible', rows: [], listeners: new Map(),
+    getElementById(id) {
+      if (!elements.has(id)) elements.set(id, new Element(document, { id, tag: setupIds.has(id) ? 'input' : 'div' }));
+      return elements.get(id);
+    },
+    querySelectorAll(selector) { return selector === '#teamRows tr' ? document.rows : []; },
+    querySelector() { return null; },
+    addEventListener(type, listener) { const list = document.listeners.get(type) || []; list.push(listener); document.listeners.set(type, list); },
+  };
+  document.body = new Element(document); document.documentElement = new Element(document);
+  document.documentElement.dataset.theme = 'light';
+  const template = document.getElementById('matchTemplate');
+  template.content = { cloneNode() { const fragment = new Element(document); fragment.children.set('.match-card', new Element(document, { classes: 'match-card' })); return fragment; } };
+  const location = { href: 'https://example.invalid/?t=persistence-qa', search: '?t=persistence-qa', protocol: 'https:' };
+  const server = { row: row ? json(row) : null, calls: [], creates: [] };
+  const DB = {
+    isConfigured: () => configured, init() {},
+    getSession: async () => configured ? { user: { id: userId, email: 'qa@admin.beachvolley.app' } } : null,
+    onAuthStateChange() {}, sessionUsername: () => 'qa',
+    getMyRole: async () => 'owner', listTournamentAdmins: async () => [],
+    loadTournamentBySlug: async () => server.row ? json(server.row) : null,
+    subscribeToTournament() {}, unsubscribe() {},
+    async createTournament(name, slug, state) {
+      const call = { name, slug, state: json(state) }; server.creates.push(call);
+      if (create) return create(call, server);
+      server.row = { id: 'tournament-1', name, slug, state: json(call.state), revision: 0, public_read: true, owner_id: userId };
+      return json(server.row);
+    },
+    async saveTournamentState(id, state, revision) {
+      const call = { id, state: json(state), revision }; server.calls.push(call);
+      if (save) return save(call, server);
+      if (revision !== server.row.revision) throw new Error('revision_conflict');
+      server.row = { ...server.row, state: json(state), revision: revision + 1 };
+      return json(server.row);
+    },
+  };
+  const window = { crypto: webcrypto, structuredClone, BEACH_APP_CONFIG: { defaultTournamentSlug: 'persistence-qa', supabaseUrl: backend }, BeachDB: DB, location,
+    addEventListener() {}, scrollY: 0, innerHeight: 900, matchMedia: () => ({ matches: false }), scrollTo() {} };
+  const context = vm.createContext({ window, document, localStorage: storage, sessionStorage: new Storage(), location, navigator: {}, history: { replaceState() {} },
+    URL, URLSearchParams, structuredClone, crypto: webcrypto, Date, Promise, console: { warn() {}, error() {}, log() {} },
+    setTimeout(fn, delay = 0) { const id = ++timerId; timers.set(id, { fn, delay }); return id; }, clearTimeout(id) { timers.delete(id); }, setInterval() {}, requestAnimationFrame() {} });
+  vm.runInContext(fs.readFileSync(path.join(root, 'engine.js'), 'utf8'), context);
+  const source = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+  const boot = source.lastIndexOf("\n  if (document.readyState");
+  assert.ok(boot > 0, 'application startup boundary must exist');
+  const adapter = `
+    const originalBindEvents = bindEvents;
+    initializeTheme = stabilizeMobileViewport = bindEvents = rememberCurrentScroll = captureBackgroundUiState = restoreSavedScroll = restoreScrollValue = restoreUiControls = () => {};
+    hydrateUiState = () => ({});
+    updateAccessUI = renderHeader = renderDashboard = renderSetup = renderMatches = renderLive = updateOnlinePanel = () => {};
+    window.__app = {
+      start: bootstrap, bindEvents: originalBindEvents, renderTeamRows, renderMatchCard,
+      flushOnlineSave, loadOnlineTournament, saveLocalState, noteLocalEdit, createOnlineTournament, hasUnsavedLocalChanges,
+      state: () => state, online: () => online, drafts: () => scoreDrafts,
+      setupForm: () => typeof setupDraftForm === 'undefined' ? null : setupDraftForm,
+      replaceState: value => { state = Engine.normalizeState(value); },
+      connect: value => { online.session = {user:{id:'admin-1'}}; online.tournament=value; online.revision=value.revision; online.role='owner'; online.accessReady=true; online.authReady=true; },
+    };
+  })();`;
+  vm.runInContext(source.slice(0, boot) + adapter, context);
+  const api = window.__app;
+  return { api, Engine: window.BeachEngine, document, elements, storage, server, timers,
+    stored: () => JSON.parse(storage.getItem(storageKey)),
+    draft: () => JSON.parse(storage.getItem(storageKey + ':draft')),
+  };
+}
+
+function tournament(Engine, started = true) {
+  const state = Engine.createDefaultState(); state.settings.format = Engine.FORMATS.SINGLE_ELIMINATION;
+  for (let i = 0; i < 4; i++) state.teams[i].name = `Coppia ${i + 1}`;
+  if (started) Engine.generateTournament(state, { drawCode: 'SAVE-QA' });
+  return state;
+}
+function rowFor(state, revision = 1) { return { id: 'tournament-1', slug: 'persistence-qa', state: json(state), revision, public_read: true, owner_id: 'admin-1' }; }
+
+test('a started team name is retained on immediate reload while the field still has focus', async () => {
+  const app = harness(); app.api.replaceState(tournament(app.Engine)); app.api.saveLocalState(); app.api.renderTeamRows();
+  const name = app.document.rows[0].querySelector('.team-name-input'); name.focus();
+  name.value = 'Nome corretto'; await name.fire('input');
+  const reopened = harness({ storage: app.storage });
+  assert.equal(reopened.api.state().teams[0].name, 'Nome corretto', 'valid input must be durable before blur/change');
+});
+
+test('an incomplete or duplicate name cannot erase an entrant after the tournament starts', async () => {
+  const app = harness(); app.api.replaceState(tournament(app.Engine)); app.api.saveLocalState(); app.api.renderTeamRows();
+  const name = app.document.rows[0].querySelector('.team-name-input');
+  name.value = ''; await name.fire('input'); await name.fire('change');
+  assert.equal(app.api.state().teams[0].name, 'Coppia 1');
+  name.value = 'Coppia 2'; await name.fire('input'); await name.fire('change');
+  assert.equal(app.api.state().teams[0].name, 'Coppia 1');
+  assert.equal(app.stored().teams[0].name, 'Coppia 1');
+});
+
+test('numeric setup edits are retained before leaving the input', async () => {
+  const app = harness(); app.api.replaceState(tournament(app.Engine, false)); app.api.saveLocalState(); app.api.bindEvents();
+  const courts = app.document.getElementById('courtsInput'); courts.focus(); courts.value = '3'; await courts.fire('input');
+  const reopened = harness({ storage: app.storage });
+  assert.equal(reopened.api.state().settings.courts, 3);
+});
+
+test('a durable local edit is clean without sending a network save', async () => {
+  const app = harness(); app.api.replaceState(tournament(app.Engine, false));
+  app.api.state().settings.courts = 3; app.api.noteLocalEdit({ wholeState: true });
+  assert.equal(app.stored().settings.courts, 3);
+  assert.equal(app.api.hasUnsavedLocalChanges(), false, 'successful local persistence acknowledges the edit');
+  assert.equal(app.server.calls.length, 0, 'local mode does not require a backend');
+  assert.match(app.document.getElementById('saveStatusText').textContent, /questo dispositivo/);
+});
+
+test('storage quota failure remains dirty and visibly unsaved until durable retry succeeds', () => {
+  const storage = new Storage(); const app = harness({ storage });
+  app.api.replaceState(tournament(app.Engine, false)); assert.equal(app.api.saveLocalState(), true);
+  const durableWrite = storage.setItem.bind(storage);
+  storage.setItem = () => { throw new Error('QuotaExceededError'); };
+  app.api.state().settings.courts = 3; app.api.noteLocalEdit({ wholeState: true });
+  assert.equal(app.api.hasUnsavedLocalChanges(), true, 'failed persistence cannot acknowledge an edit');
+  assert.equal(app.api.saveLocalState(), false);
+  assert.match(app.document.getElementById('saveStatusText').textContent, /non riuscito/);
+  assert.doesNotMatch(app.document.getElementById('saveStatusText').textContent, /Tutte le modifiche sono salvate/);
+  assert.equal(app.document.getElementById('saveStatusBar').classList.contains('save-error'), true);
+  assert.equal(app.stored().settings.courts, 5, 'a failed write leaves the previous durable state intact');
+  storage.setItem = durableWrite;
+  assert.equal(app.api.saveLocalState(), true);
+  assert.equal(app.api.hasUnsavedLocalChanges(), false);
+  assert.equal(app.document.getElementById('saveStatusBar').classList.contains('save-error'), false);
+  assert.doesNotMatch(app.document.getElementById('saveStatusText').textContent, /non riuscito/);
+  const reopened = harness({ storage });
+  assert.equal(reopened.api.state().settings.courts, 3, 'retry is verified by a fresh application instance');
+});
+
+test('a failed online save recovers the pending local draft after reload', async () => {
+  const initial = harness(); const original = tournament(initial.Engine);
+  const app = harness({ configured: true, row: rowFor(original), save: async () => { throw new Error('offline'); } });
+  await app.api.start();
+  app.api.state().teams[0].name = 'Modifica offline'; app.api.noteLocalEdit({ teamIndex: 0 });
+  await app.api.flushOnlineSave();
+  assert.equal(app.draft().pending, true);
+  const reopened = harness({ configured: true, row: rowFor(original), storage: app.storage }); await reopened.api.start();
+  assert.equal(reopened.api.state().teams[0].name, 'Modifica offline');
+  await reopened.api.flushOnlineSave();
+  assert.equal(reopened.server.row.state.teams[0].name, 'Modifica offline');
+  assert.equal(reopened.draft().pending, false);
+});
+
+test('a later local edit remains pending when an earlier network save completes', async () => {
+  const initial = harness(); const original = tournament(initial.Engine);
+  let finish;
+  const app = harness({ configured: true, row: rowFor(original), save: async (call, server) => {
+    if (server.calls.length === 1) await new Promise(resolve => { finish = resolve; });
+    assert.equal(call.revision, server.row.revision);
+    server.row = { ...server.row, state: json(call.state), revision: call.revision + 1 }; return json(server.row);
+  } });
+  await app.api.start();
+  app.api.state().teams[0].name = 'Prima modifica'; app.api.noteLocalEdit({ teamIndex: 0 });
+  const first = app.api.flushOnlineSave();
+  app.api.state().teams[0].name = 'Ultima modifica'; app.api.noteLocalEdit({ teamIndex: 0 });
+  finish(); await first;
+  assert.equal(app.draft().pending, true, 'an earlier response cannot mark the later edit saved');
+  await app.api.flushOnlineSave();
+  assert.equal(app.server.row.state.teams[0].name, 'Ultima modifica');
+  assert.deepEqual(app.server.calls.map(call => call.revision), [1, 2]);
+  assert.equal(app.draft().pending, false);
+});
+
+test('a configured project retains the uncreated tournament and its creation form on reload', async () => {
+  const app = harness({ configured: true }); await app.api.start(); app.api.bindEvents();
+  app.api.replaceState(tournament(app.Engine, false)); app.api.noteLocalEdit({ wholeState: true });
+  const name = app.document.getElementById('onlineTournamentName'); name.value = 'Evento da creare'; await name.fire('input');
+  const slug = app.document.getElementById('onlineTournamentSlug'); slug.value = 'evento-sulla-spiaggia'; await slug.fire('input');
+  await app.api.loadOnlineTournament({ quiet: true });
+  assert.equal(app.api.state().teams[0].name, 'Coppia 1', 'a missing remote row must not reset prepared entrants');
+  const reopened = harness({ configured: true, storage: app.storage }); await reopened.api.start();
+  assert.equal(reopened.api.state().teams[0].name, 'Coppia 1');
+  assert.equal(reopened.api.setupForm()?.name, 'Evento da creare');
+  assert.equal(reopened.api.setupForm()?.slug, 'evento-sulla-spiaggia');
+  assert.equal(reopened.server.creates.length, 0, 'recovering a draft cannot create a remote tournament');
+});
+
+test('an uncreated tournament draft is isolated from other admins and backend projects', async () => {
+  const app = harness({ configured: true }); await app.api.start();
+  app.api.replaceState(tournament(app.Engine, false)); app.api.noteLocalEdit({ wholeState: true });
+  for (const options of [{ userId: 'admin-2' }, { backend: 'https://other.supabase.co' }]) {
+    const other = harness({ configured: true, storage: app.storage, ...options }); await other.api.start();
+    assert.equal(other.api.state().teams.filter(item => item.name.trim()).length, 0, 'another scope must start blank');
+  }
+});
+
+test('an edit made while a tournament is being created is saved after the creation snapshot', async () => {
+  let finish;
+  const app = harness({ configured: true, create: async (call, server) => {
+    await new Promise(resolve => { finish = resolve; });
+    server.row = { id: 'tournament-1', name: call.name, slug: call.slug, state: json(call.state), revision: 0, public_read: true, owner_id: 'admin-1' };
+    return json(server.row);
+  } });
+  await app.api.start(); app.api.replaceState(tournament(app.Engine, false)); app.api.noteLocalEdit({ wholeState: true });
+  app.document.getElementById('onlineTournamentName').value = 'Evento QA';
+  app.document.getElementById('onlineTournamentSlug').value = 'persistence-qa';
+  const creating = app.api.createOnlineTournament();
+  assert.equal(typeof finish, 'function', 'the real create action must have reached the database adapter');
+  app.api.state().teams[0].name = 'Correzione durante creazione'; app.api.noteLocalEdit({ teamIndex: 0 });
+  finish(); await creating;
+  assert.equal(app.server.creates[0].state.teams[0].name, 'Coppia 1', 'the first request represents the earlier state');
+  await app.api.flushOnlineSave();
+  assert.equal(app.server.row.state.teams[0].name, 'Correzione durante creazione', 'a creation response cannot silently acknowledge a later edit');
+  assert.equal(app.draft().pending, false);
+});
+
+test('a failed remote creation retains entrants, settings and the candidate creation form on reload', async () => {
+  const app = harness({ configured: true, create: async () => { throw new Error('network unavailable'); } });
+  await app.api.start(); app.api.bindEvents();
+  app.api.replaceState(tournament(app.Engine, false)); app.api.state().settings.courts = 3;
+  app.api.noteLocalEdit({ wholeState: true });
+  const name = app.document.getElementById('onlineTournamentName'); name.value = 'Evento non pubblicato'; await name.fire('input');
+  const slug = app.document.getElementById('onlineTournamentSlug'); slug.value = 'prova-errore-creazione'; await slug.fire('input');
+  await app.api.createOnlineTournament();
+  assert.equal(app.server.creates.length, 1);
+  assert.equal(app.api.online().tournament, null);
+  assert.equal(app.api.online().creating, false);
+  const reopened = harness({ configured: true, storage: app.storage }); await reopened.api.start();
+  assert.equal(reopened.api.state().teams[0].name, 'Coppia 1');
+  assert.equal(reopened.api.state().settings.courts, 3);
+  assert.equal(reopened.api.state().settings.tournamentName, 'Evento non pubblicato');
+  assert.equal(reopened.api.setupForm()?.name, 'Evento non pubblicato');
+  assert.equal(reopened.api.setupForm()?.slug, 'prova-errore-creazione');
+  assert.equal(reopened.server.creates.length, 0, 'recovery never silently retries a remote creation');
+});

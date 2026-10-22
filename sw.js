@@ -1,6 +1,6 @@
 'use strict';
-const CACHE_NAME='beach-chill-glow-v13-0';
-const CORE=['./vendor/supabase.js?v=13.0','./','./index.html','./style.css?v=13.0','./hmi-v10.css?v=13.0','./professional.css?v=13.0','./arena.css?v=13.0','./app.js?v=13.0','./engine.js?v=13.0','./db.js?v=13.0','./config.js?v=13.0','./manifest.webmanifest','./beach-chill-logo.png','./icon-192.png','./icon-512.png','./apple-touch-icon.png'];
+const CACHE_NAME='beach-chill-glow-v13-1';
+const CORE=['./vendor/supabase.js?v=13.1','./','./index.html','./style.css?v=13.1','./hmi-v10.css?v=13.1','./professional.css?v=13.1','./arena.css?v=13.1','./app.js?v=13.1','./engine.js?v=13.1','./db.js?v=13.1','./config.js?v=13.1','./manifest.webmanifest','./beach-chill-logo.png','./icon-192.png','./icon-512.png','./apple-touch-icon.png'];
 const assets=new Set(CORE.map(path=>new URL(path,self.location.href).href));
 self.addEventListener('install',event=>{event.waitUntil(caches.open(CACHE_NAME).then(cache=>cache.addAll(CORE)));self.skipWaiting();});
 self.addEventListener('activate',event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith('beach-chill-') && key!==CACHE_NAME).map(key=>caches.delete(key)))));self.clients.claim();});
