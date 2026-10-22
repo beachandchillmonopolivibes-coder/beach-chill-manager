@@ -1,14 +1,16 @@
-# Beach & Chill · Tournament Manager Pro 11
+# Beach & Chill · Glow Arena 13
 
 Applicazione web responsive per organizzare tornei di beach volley, gestire squadre e risultati e condividere la vista Live con i giocatori. Frontend statico su Vercel; autenticazione, database e aggiornamenti su Supabase.
 
 ## Parti da qui
 
+Se aggiorni una versione 11 o 12 già online, segui **[Aggiornare il layout Glow Arena 13](docs/AGGIORNAMENTO_LAYOUT_V13.md)**. Per questo restyling non servono migrazioni SQL o nuovi amministratori.
+
 1. Leggi **[Guida Supabase + Vercel](docs/GUIDA_SUPABASE_VERCEL.md)** per installazione, amministratori e pubblicazione.
 2. Per un database esistente segui **[Aggiornamento senza perdita di dati](docs/AGGIORNAMENTO_V11.md)** prima del deploy.
 3. Segui **[Manuale operativo](docs/MANUALE_OPERATIVO.md)** per iscrizioni, avvio, punteggi e correzioni.
 
-## Regola operativa della versione 11
+## Regola operativa del torneo
 
 **Prima dell’avvio** puoi preparare squadre, teste di serie, gironi, formula e impostazioni. **Dal primo avvio** l’organico e la struttura sono bloccati: si possono correggere nomi delle squadre e punteggi in qualsiasi fase, oltre ad avanzare il torneo. Una correzione che cambia gli accoppiamenti richiede conferma e annulla i turni successivi interessati. Per un organico diverso crea un nuovo torneo.
 

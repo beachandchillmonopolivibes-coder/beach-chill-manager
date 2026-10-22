@@ -60,8 +60,8 @@ async function newPage({ state, mobile = false, unavailable = false, conflict = 
     if (connection && /\/db\.js(?:\?|$)/.test(route.request().url())) return route.fulfill({ contentType:'text/javascript',body:`
       window.__mockSession=${JSON.stringify(connection.signedIn ? {user:{id:'qa-admin-id',email:'admin@admin.beachvolley.app'}} : null)};
       window.__mockRow=${JSON.stringify(connection.existing ? {id:'qa-tournament-id',slug:'qa-tournament',name:'QA Beach Tournament',public_read:true,state:stateWithTeams(false),revision:1,owner_id:'qa-admin-id',updated_at:'2026-10-22T10:00:00Z'} : null)};
-      window.__createdTournament=null;
-      window.BeachDB={isConfigured:()=>true,init:()=>null,getSession:async()=>window.__mockSession,onAuthStateChange:()=>({data:{subscription:{unsubscribe(){}}}}),getMyRole:async()=>window.__mockSession?'owner':null,listTournamentAdmins:async()=>[],sessionUsername:()=>window.__mockSession?'admin':'',loadTournamentBySlug:async()=>structuredClone(window.__mockRow),subscribeToTournament(){},unsubscribe(){},createTournament:async(name,slug,state)=>{window.__createdTournament={name,slug,state:structuredClone(state)};window.__mockRow={id:'qa-created-id',slug,name,public_read:true,state:structuredClone(state),revision:0,owner_id:'qa-admin-id',updated_at:'2026-10-22T10:00:00Z'};return structuredClone(window.__mockRow);}};
+      window.__createdTournament=null; window.__saveCalls=0;
+      window.BeachDB={isConfigured:()=>true,init:()=>null,getSession:async()=>window.__mockSession,onAuthStateChange:()=>({data:{subscription:{unsubscribe(){}}}}),getMyRole:async()=>window.__mockSession?'owner':null,listTournamentAdmins:async()=>[],sessionUsername:()=>window.__mockSession?'admin':'',loadTournamentBySlug:async()=>structuredClone(window.__mockRow),subscribeToTournament(){},unsubscribe(){},saveTournamentState:async(id,state,revision)=>{window.__saveCalls+=1;window.__mockRow.state=structuredClone(state);window.__mockRow.revision+=1;return structuredClone(window.__mockRow);},createTournament:async(name,slug,state)=>{window.__createdTournament={name,slug,state:structuredClone(state)};window.__mockRow={id:'qa-created-id',slug,name,public_read:true,state:structuredClone(state),revision:0,owner_id:'qa-admin-id',updated_at:'2026-10-22T10:00:00Z'};return structuredClone(window.__mockRow);}};
     ` });
     if (conflict && /\/db\.js(?:\?|$)/.test(route.request().url())) return route.fulfill({ contentType: 'text/javascript', body: `
       window.__initialRow=${JSON.stringify({id:'qa-tournament-id',slug:'qa-tournament',name:'QA Beach Tournament',public_read:true,state:stateWithTeams(true),revision:1,owner_id:'qa-admin-id',updated_at:'2026-10-22T10:00:00Z'})};
@@ -104,6 +104,9 @@ for (const mobile of [false, true]) {
       await input.fill(''); await input.blur(); await settle(page);
       assert.equal((await currentState(page)).teams[0].name, 'Coppia rinominata', 'non si può rimuovere una coppia dopo avvio');
       assert.equal(await page.locator('#clearTeamsBtn').isDisabled(), true);
+      assert.equal(await page.locator('#clearTeamsBtn').isVisible(), false);
+      assert.equal(await page.locator('#loadDefaultsBtn').isVisible(), false);
+      assert.equal(await page.locator('#clearBulkBtn').isVisible(), false);
       await capture(page,mobile?'qa-teams-mobile-final':'qa-teams-desktop-final');
       await page.locator('[data-tab=setup]').click();
       assert.equal(await page.locator('#courtsInput').isDisabled(), true);
@@ -359,6 +362,56 @@ test('Connessione: un torneo esistente caricato da Supabase mostra Online', asyn
     await page.waitForFunction(()=>document.querySelector('#connectionStatus span:last-child')?.textContent.trim()==='Online');
     assert.equal((await page.locator('#connectionStatus span:last-child').innerText()).trim(),'Online');
     assert.equal(await page.locator('#appTitle').innerText(),'QA Beach Tournament');
+    await expectNoErrors(page);
+  } finally {await context.close();}
+});
+
+for (const onlineMode of [false,true]) {
+  test(`Svuota esempio: cancella testo, anteprima e opzioni senza modificare gli iscritti (${onlineMode?'online simulato':'locale'})`,async()=>{
+    const {context,page}=await newPage(onlineMode?{connection:{signedIn:true,existing:true}}:{state:stateWithTeams(false)});
+    try {
+      await page.goto(`${base}/?t=qa-tournament&open=teams`);
+      await page.locator('#teams.view.active').waitFor();
+      const before=JSON.stringify(await currentState(page));
+      const remoteBefore=onlineMode?await page.evaluate(()=>JSON.stringify(window.__mockRow)):null;
+      await page.locator('#loadDefaultsBtn').click();
+      await page.locator('#bulkTeamsInput').waitFor({state:'visible'});
+      assert.match(await page.locator('#bulkTeamsInput').inputValue(),/Giocatore A/);
+      assert.match(await page.locator('#bulkPreviewCount').innerText(),/12 coppie/);
+      await page.locator('#bulkUseNumbersAsSeeds').check();
+      await page.locator('#clearBulkBtn').click();
+      assert.equal(await page.locator('#bulkTeamsInput').inputValue(),'');
+      assert.equal(await page.locator('#bulkUseNumbersAsSeeds').isChecked(),false);
+      assert.match(await page.locator('#bulkPreviewCount').innerText(),/0 coppie/);
+      assert.equal(await page.locator('#bulkPreviewList article').count(),0);
+      assert.equal(await page.locator('#bulkApplyBtn').isDisabled(),true);
+      assert.equal(await page.locator('#confirmDialog[open]').count(),0,'svuotare la bozza non richiede una conferma sugli iscritti');
+      await page.waitForTimeout(1100);
+      assert.equal(JSON.stringify(await currentState(page)),before,'gli iscritti effettivi non cambiano');
+      if(onlineMode){assert.equal(await page.evaluate(()=>window.__saveCalls),0,'nessuna richiesta di salvataggio per il testo di esempio');assert.equal(await page.evaluate(()=>JSON.stringify(window.__mockRow)),remoteBefore);}
+      await expectNoErrors(page);
+    } finally {await context.close();}
+  });
+}
+
+test('Svuota squadre: richiede conferma, Annulla conserva le coppie e Conferma rimuove gli iscritti',async()=>{
+  const {context,page}=await newPage({state:stateWithTeams(false)});
+  try {
+    await page.goto(`${base}/?t=qa-tournament&open=teams`);
+    await page.locator('#teams.view.active').waitFor();
+    const before=JSON.stringify(await currentState(page));
+    assert.match(await page.locator('#clearTeamsBtn').innerText(),/Svuota squadre/);
+    await page.locator('#clearTeamsBtn').click();
+    await page.locator('#confirmDialog[open]').waitFor();
+    await page.locator('#confirmCancel').click();await settle(page);
+    assert.equal(JSON.stringify(await currentState(page)),before);
+    await page.locator('#clearTeamsBtn').click();
+    await page.locator('#confirmDialog[open]').waitFor();
+    await page.locator('#confirmAccept').click();await settle(page);
+    const cleared=await currentState(page);
+    assert.ok(cleared.teams.every(team=>!team.name.trim()&&team.seed===null&&team.manualGroup===null));
+    assert.match(await page.locator('#teamCountBadge').innerText(),/0 \/ 24/);
+    assert.equal(cleared.matches.length,0);
     await expectNoErrors(page);
   } finally {await context.close();}
 });

@@ -1,5 +1,6 @@
-# Inizia da qui · Pro 11
+# Inizia da qui · Glow Arena 13
 
+- **Aggiorni la versione 11 o 12 già online?** [docs/AGGIORNAMENTO_LAYOUT_V13.md](docs/AGGIORNAMENTO_LAYOUT_V13.md). Per il restyling non serve SQL.
 - **Installazione e accessi:** [docs/GUIDA_SUPABASE_VERCEL.md](docs/GUIDA_SUPABASE_VERCEL.md).
 - **Hai già un torneo nel vecchio database?** Segui prima [docs/AGGIORNAMENTO_V11.md](docs/AGGIORNAMENTO_V11.md).
 - **Gestione squadre, avvio e risultati:** [docs/MANUALE_OPERATIVO.md](docs/MANUALE_OPERATIVO.md).

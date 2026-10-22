@@ -1,5 +1,5 @@
 {
-  "name": "Beach & Chill Tournament Manager Pro",
+  "name": "Beach & Chill Glow Arena",
   "short_name": "Beach & Chill",
   "description": "Gestione tornei di beach volley: squadre, gironi, playoff e risultati Live.",
   "lang": "it",
@@ -7,8 +7,8 @@
   "scope": "./",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#fff7ef",
-  "theme_color": "#ff6b35",
+  "background_color": "#0b0d1c",
+  "theme_color": "#0b0d1c",
   "icons": [
     {
       "src": "icon-192.png",

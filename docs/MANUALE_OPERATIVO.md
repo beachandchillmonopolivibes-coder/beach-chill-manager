@@ -18,6 +18,8 @@ Prima dell’avvio apri **Squadre**:
 
 Puoi incollare una coppia per riga oppure colonne Excel separate da tab/punto e virgola: `Nome coppia; TS; Girone` o `Giocatore 1; Giocatore 2; TS; Girone`. Il numero iniziale è facoltativo. L’anteprima segnala nomi duplicati, nomi troppo lunghi e liste oltre 24 coppie: correggi l’elenco prima di importare; nessuna riga eccedente viene scartata automaticamente.
 
+**Carica esempio** riempie il box di importazione. **Svuota**, accanto a quel pulsante, cancella subito il testo e l’anteprima, mantenendo le squadre già caricate. Per cancellare le iscrizioni prima dell’avvio usa **Svuota squadre**, sotto la tabella, e conferma.
+
 Il motore gestisce al massimo 24 squadre. Le formule a eliminazione richiedono almeno 2 squadre; il girone unico con Final Four richiede da 4 a 10 squadre. Per gironi + playoff l’app controlla anche numero di gironi, dimensioni, qualificate e teste di serie: risolvi i messaggi di validazione prima dell’avvio.
 
 Non usare i nomi per salvare contatti o dati riservati: se abiliti Live lo stato del torneo diventa leggibile dal pubblico.

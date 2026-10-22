@@ -3,7 +3,12 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const root = path.resolve(__dirname, '..', 'dist');
-const port = Number(process.env.PORT || 4173);
+const option = (name) => {
+  const index = process.argv.indexOf(name);
+  return index >= 0 ? process.argv[index + 1] : undefined;
+};
+const port = Number(option('--port') || process.env.PORT || 4173);
+const host = option('--host') || '127.0.0.1';
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 http.createServer((req, res) => {
   let requested;
@@ -16,4 +21,4 @@ http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': types[path.extname(filename)] || 'application/octet-stream', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
     res.end(data);
   });
-}).listen(port, '127.0.0.1', () => console.log(`Anteprima locale: http://localhost:${port}`));
+}).listen(port, host, () => console.log(`Anteprima locale: http://localhost:${port}`));

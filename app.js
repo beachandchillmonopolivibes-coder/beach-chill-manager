@@ -8,6 +8,14 @@
   const LEGACY_KEYS = ['beach-volley-state-v5', 'beach-volley-state-v4', 'beach-volley-state-v3'];
   const UI_STATE_PREFIX = 'beach-volley-ui-v10-7-tab-resume';
   const VALID_TABS = new Set(['dashboard', 'setup', 'teams', 'matches', 'live', 'more']);
+  const VIEW_LABELS = {
+    dashboard: 'Panoramica',
+    setup: 'Configura torneo',
+    teams: 'Squadre partecipanti',
+    matches: 'Gestione partite',
+    live: 'Risultati live',
+    more: 'Accesso & Live',
+  };
   const VALID_LIVE_VIEWS = new Set(['overview', 'standings', 'bracket']);
 
   let state = loadLocalState();
@@ -875,6 +883,7 @@ async function initializeOnline() {
     const { restore = true, updateUrl = true, persist = true } = options;
     if (activeTab && activeTab !== tabId) rememberCurrentScroll();
     activeTab = tabId;
+    if ($('currentViewLabel')) $('currentViewLabel').textContent = VIEW_LABELS[tabId];
     $$('.view').forEach((view) => view.classList.toggle('active', view.id === tabId));
     $$('.nav-item').forEach((button) => {
       const selected = button.dataset.tab === tabId;
@@ -960,6 +969,11 @@ async function initializeOnline() {
     const pending = state.matches.filter((match) => Engine.matchStatus(match) === 'DA GIOCARE').length;
     const stageDone = state.matches.length && Engine.stageComplete(state);
 
+    if ($('heroEventLabel')) {
+      $('heroEventLabel').textContent = state.settings.eventDate
+        ? new Date(`${state.settings.eventDate}T12:00:00`).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' })
+        : 'La tua giornata di beach volley';
+    }
     $('heroFormat').textContent = Engine.formatLabel(state.settings.format);
     $('heroPhase').textContent = Engine.phaseLabel(state);
     $('progressValue').textContent = `${progress.percent}%`;
@@ -971,12 +985,14 @@ async function initializeOnline() {
 
     const button = $('primaryActionBtn');
     if (!state.matches.length) {
-      $('primaryActionTitle').textContent = active.length ? 'Completa e genera il torneo' : 'Configura il torneo';
-      $('primaryActionHint').textContent = 'Scegli formula e coppie.';
+      $('primaryActionTitle').textContent = active.length ? 'Pronti per la prima battuta?' : 'Il tuo torneo inizia qui.';
+      $('primaryActionHint').textContent = active.length
+        ? `${active.length} coppie in elenco. Completa la configurazione e porta il torneo in campo.`
+        : 'Scegli la formula, aggiungi le coppie e dai il via alla tua giornata in campo.';
       button.textContent = 'Apri configurazione';
       button.dataset.action = 'setup';
     } else if (Engine.tournamentComplete(state)) {
-      $('primaryActionTitle').textContent = 'Torneo concluso';
+      $('primaryActionTitle').textContent = 'Una giornata da ricordare.';
       $('primaryActionHint').textContent = state.silverChampionId
         ? `Gold: ${Engine.team(state, state.championId)?.name || '—'} · Silver: ${Engine.team(state, state.silverChampionId)?.name || '—'}.`
         : `Campione: ${Engine.team(state, state.championId)?.name || '—'}.`;
@@ -986,12 +1002,15 @@ async function initializeOnline() {
       const playoffPending = state.settings.format === Engine.FORMATS.GROUPS_PLAYOFF
         && !state.matches.some((match) => ['K', 'S'].includes(match.bracket));
       $('primaryActionTitle').textContent = playoffPending ? 'Fase a gironi completata' : 'Turno completato';
-      $('primaryActionHint').textContent = playoffPending ? `Classifiche definitive${state.settings.formatOptions.silverEnabled ? ' · Gold e Silver' : ''}.` : 'Turno completato.';
+      $('primaryActionHint').textContent = playoffPending
+        ? `Le classifiche sono pronte. È il momento dei playoff${state.settings.formatOptions.silverEnabled ? ' Gold e Silver' : ' Gold'}.`
+        : 'Tutti i risultati sono salvati. Puoi generare la fase successiva.';
       button.textContent = playoffPending ? (state.settings.formatOptions.silverEnabled ? 'Genera Gold + Silver' : 'Genera playoff Gold') : 'Genera fase successiva';
       button.dataset.action = 'advance';
     } else {
-      $('primaryActionTitle').textContent = 'Inserisci i risultati';
-      $('primaryActionHint').textContent = `${current.filter((match) => Engine.matchStatus(match) === 'DA GIOCARE').length} partite pronte.`;
+      $('primaryActionTitle').textContent = 'Il torneo entra nel vivo.';
+      const readyCount = current.filter((match) => Engine.matchStatus(match) === 'DA GIOCARE').length;
+      $('primaryActionHint').textContent = `${readyCount} ${readyCount === 1 ? 'partita da giocare' : 'partite da giocare'} in questa fase. Aggiorna i punteggi e segui ogni sfida.`;
       button.textContent = 'Gestisci partite';
       button.dataset.action = 'matches';
     }
@@ -1036,17 +1055,35 @@ async function initializeOnline() {
       .sort((a, b) => a.order - b.order)
       .slice(0, limit);
     if (!matches.length) {
-      container.innerHTML = `<div class="empty-state"><div><strong>${state.matches.length ? 'Nessuna partita pronta' : 'Torneo non generato'}</strong><span>${state.matches.length ? 'Completa il turno.' : 'Apri Configura.'}</span></div></div>`;
+      const editableDashboard = dashboard && canEdit();
+      const complete = Boolean(state.matches.length && Engine.tournamentComplete(state));
+      const title = !state.matches.length
+        ? (editableDashboard ? 'Il campo ti aspetta' : 'Il programma è in arrivo')
+        : (complete ? 'Torneo concluso' : 'Nessuna partita pronta');
+      const hint = !state.matches.length
+        ? (editableDashboard ? 'Aggiungi le coppie e genera il torneo per vedere qui le prime sfide.' : 'L’organizzazione sta preparando le prime sfide.')
+        : complete
+          ? 'Consulta risultati, classifiche e tabellone nella vista Live.'
+          : (editableDashboard ? 'Controlla i risultati del turno e genera la fase successiva.' : 'La prossima fase sarà pubblicata dall’organizzazione.');
+      container.innerHTML = `<div class="empty-state"><svg class="empty-state-icon" viewBox="0 0 80 64" fill="none" aria-hidden="true"><path d="M12 24 50 16l20 23-39 13L12 24Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="m32 20 20 26M28 18v23m32-28v24M28 18l32-5v18l-32 10V18Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><path d="m36 16 1 22m7-24 1 21m7-23 1 21m-25-9 32-8m-32 16 32-9" stroke="currentColor" stroke-width=".75" opacity=".45"/><circle cx="17" cy="12" r="5" stroke="currentColor" stroke-width="1.6"/><path d="M14 8c3 3 5 3 7 3M13 15c2-2 3-4 3-7" stroke="currentColor" stroke-width="1"/></svg><div><strong>${title}</strong><span>${hint}</span></div></div>`;
       return;
     }
+    const actionable = dashboard && canEdit();
     container.innerHTML = matches.map((match) => {
       const a = Engine.team(state, match.aId)?.name || 'Da definire';
       const b = Engine.team(state, match.bId)?.name || 'Da definire';
       const location = [match.court, match.startTime].filter(Boolean).join(' · ') || 'Campo/orario da assegnare';
-      return `<article class="next-match" data-match-id="${escapeAttr(match.id)}"><span class="code">${escapeHtml(match.id)}</span><div class="pair"><strong>${escapeHtml(a)}</strong><small>vs ${escapeHtml(b)}</small></div><span class="location">${escapeHtml(location)}</span></article>`;
+      return `<article class="next-match${actionable ? ' is-actionable' : ''}" data-match-id="${escapeAttr(match.id)}"${actionable ? ` role="button" tabindex="0" aria-label="${escapeAttr(`Gestisci ${match.id}: ${a} contro ${b}`)}"` : ''}><span class="code">${escapeHtml(match.id)}</span><div class="pair"><strong>${escapeHtml(a)}</strong><small>vs ${escapeHtml(b)}</small></div><span class="location">${escapeHtml(location)}</span></article>`;
     }).join('');
-    if (dashboard && canEdit()) {
-      $$('.next-match', container).forEach((card) => card.addEventListener('click', () => switchTab('matches')));
+    if (actionable) {
+      $$('.next-match', container).forEach((card) => {
+        card.addEventListener('click', () => switchTab('matches'));
+        card.addEventListener('keydown', (event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          event.preventDefault();
+          switchTab('matches');
+        });
+      });
     }
   }
 
@@ -1263,8 +1300,10 @@ async function initializeOnline() {
     $('bulkImportPanel').classList.toggle('hidden', locked || !editable);
     $('loadDefaultsBtn').disabled = locked || !editable;
     $('clearTeamsBtn').disabled = locked || !editable;
+    if ($('clearBulkBtn')) $('clearBulkBtn').disabled = locked || !editable;
     $('loadDefaultsBtn').classList.toggle('hidden',locked || !editable);
     $('clearTeamsBtn').classList.toggle('hidden',locked || !editable);
+    $('clearBulkBtn')?.classList.toggle('hidden',locked || !editable);
     body.innerHTML = state.teams.map((item,index) => {
       if ((locked && !item.name.trim()) || (query && !item.name.toLocaleLowerCase('it').includes(query))) return '';
       const status = item.name.trim() ? (item.seed ? `TS ${item.seed}` : 'Iscritta') : 'Disponibile';
@@ -1483,6 +1522,14 @@ async function initializeOnline() {
     showToast(`Template caricato: sostituisci i nomi e premi “Carica squadre”.${suffix}`, state.matches.length ? 'info' : 'success');
   }
 
+  function clearBulkTeamsDraft() {
+    clearTimeout(window.__bulkPreviewTimer);
+    $('bulkTeamsInput').value = '';
+    $('bulkUseNumbersAsSeeds').checked = false;
+    renderBulkPreview();
+    showToast('Box e anteprima svuotati.', 'success');
+  }
+
   function renderBulkPreview() {
     const textarea = $('bulkTeamsInput');
     const list = $('bulkPreviewList');
@@ -1493,7 +1540,7 @@ async function initializeOnline() {
     count.textContent = `${parsed.length} ${parsed.length === 1 ? 'coppia' : 'coppie'}`;
     $('bulkApplyBtn').disabled = !parsed.length || Boolean(parsed.issues.length) || tournamentStarted() || !canEdit();
     if (!parsed.length) {
-      list.innerHTML = '<p>Nessuna coppia riconosciuta.</p>';
+      list.innerHTML = textarea.value.trim() ? '<p>Nessuna coppia riconosciuta.</p>' : '<p>Incolla un elenco o carica un esempio.</p>';
       return parsed;
     }
     list.innerHTML = (parsed.issues.length ? `<p class="invalid-score">${parsed.issues.slice(0,8).map(escapeHtml).join('<br>')}</p>` : '') + parsed.slice(0, 24).map((item, index) => {
@@ -2355,12 +2402,19 @@ async function initializeOnline() {
     $('dayStartInput').addEventListener('change', (event) => { state.settings.dayStart = event.target.value || '08:45'; noteLocalEdit({ wholeState: true, delay: 250 }); renderDashboard(); updateSetupDerived(); });
     $('dayEndInput').addEventListener('change', (event) => { state.settings.dayEnd = event.target.value || '18:00'; noteLocalEdit({ wholeState: true, delay: 250 }); renderDashboard(); updateSetupDerived(); });
     $('loadDefaultsBtn').addEventListener('click', loadExampleTeamsTemplate);
+    $('clearBulkBtn')?.addEventListener('click', clearBulkTeamsDraft);
     $('clearTeamsBtn').addEventListener('click', async () => {
-      if (!ensureEditable() || state.matches.length) return;
-      const confirmed = await confirmAction('Svuotare l’elenco coppie?', 'Nomi e teste di serie verranno cancellati.', 'Svuota');
+      // Compatibility when an older index.html is still cached during deployment.
+      if (!$('clearBulkBtn')) { clearBulkTeamsDraft(); return; }
+      if (!ensureRosterEditable()) return;
+      if (!state.teams.some(item => item.name.trim() || item.seed || item.manualGroup)) { showToast('L’elenco squadre è già vuoto.'); return; }
+      const before = state, editVersion = localEditVersion;
+      const confirmed = await confirmAction('Svuotare le squadre iscritte?', 'Verranno cancellati i nomi, le teste di serie e le assegnazioni manuali delle squadre caricate nel torneo.', 'Svuota squadre');
       if (!confirmed) return;
-      state.teams.forEach((item) => { item.name = ''; item.seed = null; item.manualGroup = null; });
-      markChanged({ render: true });
+      if (!canEdit() || tournamentStarted() || state !== before || localEditVersion !== editVersion) { showToast('Il torneo è cambiato. Ricontrolla le squadre prima di svuotare.', 'error'); return; }
+      state.teams.forEach((item) => { item.name = ''; item.seed = null; item.manualGroup = null; item.updatedAt = new Date().toISOString(); });
+      markChanged({ render: true, immediate: true });
+      showToast('Squadre iscritte svuotate.', 'success');
     });
     $('bulkPreviewBtn')?.addEventListener('click', renderBulkPreview);
     $('bulkApplyBtn')?.addEventListener('click', applyBulkTeams);
