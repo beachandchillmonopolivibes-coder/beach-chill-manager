@@ -54,6 +54,7 @@ html[data-theme] body { background: var(--bg); color: var(--text); font-family: 
 .brand-wordmark > span { color: var(--pink); }
 .brand-text strong { font-size: 11px; font-weight: 500; color: var(--muted); max-width: 230px; letter-spacing: .01em; }
 .brand-text small { display: none; }
+.brand-text .app-version { color: var(--muted); font-size: 9px; line-height: 1; letter-spacing: .04em; }
 .arena-context { display: flex; align-items: center; gap: 12px; font-size: 11px; margin-left: auto; margin-right: 30px; color: var(--muted); }
 .arena-context > span { font-size: 9px; letter-spacing: .14em; }
 .arena-context i { width: 3px; height: 3px; border-radius: 50%; background: var(--primary); }

@@ -20,6 +20,8 @@ before(async()=>{
     GRANT USAGE ON SCHEMA auth TO anon,authenticated;
     CREATE PUBLICATION supabase_realtime;`);
   await db.exec(fs.readFileSync(path.join(root,'schema.sql'),'utf8'));
+  // Execute the exact compact delivery file, not a reconstructed test version.
+  await db.exec(fs.readFileSync(path.join(root,'MIGRATION_RESET_BRACKET_V13_3.sql'),'utf8'));
   for(const [name,id] of Object.entries(users))await db.query('INSERT INTO auth.users(id,email) VALUES($1,$2)',[id,`${name}@admin.beachvolley.app`]);
 });
 after(async()=>{if(db)await db.close();});
@@ -135,4 +137,48 @@ test('reset migration upgrades the old guard repeatedly without mutating tournam
   const cleared=await reset(row);
   assert.equal(cleared.state.matches.length,0);
   assert.equal(cleared.public_read,false);
+});
+
+test('the single Supabase update installs both RPCs on an old v11 backend and reruns without changing existing data',async()=>{
+  const published=await create();
+  let hidden=await create();
+  hidden=(await as('authenticated',users.owner,'SELECT * FROM public.set_tournament_public_read($1,false)',[hidden.id])).rows[0];
+  const members=(await db.query('SELECT tournament_id,user_id,role FROM public.tournament_members ORDER BY tournament_id,user_id')).rows;
+  await db.exec(fs.readFileSync(path.join(root,'MIGRATION_PRO_V11.sql'),'utf8'));
+  await db.exec('DROP FUNCTION public.create_tournament_draft(text,text,jsonb); DROP FUNCTION public.reset_tournament_bracket(uuid,bigint); DROP TABLE private.bracket_reset_context;');
+  const source=fs.readFileSync(path.join(root,'00_AGGIORNAMENTO_SUPABASE.sql'),'utf8');
+  for(let attempt=0;attempt<2;attempt++){
+    const result=(await db.exec(source)).at(-1).rows[0];
+    assert.equal(result.esito,'AGGIORNAMENTO_COMPLETATO');
+    assert.equal(result.bozza_privata,'create_tournament_draft(text,text,jsonb)');
+    assert.equal(result.elimina_tabellone,'reset_tournament_bracket(uuid,bigint)');
+    for(const original of [published,hidden])assert.deepEqual(await actual(original),original);
+    assert.deepEqual((await db.query('SELECT tournament_id,user_id,role FROM public.tournament_members ORDER BY tournament_id,user_id')).rows,members);
+  }
+  const privateDraft=(await as('authenticated',users.owner,'SELECT * FROM public.create_tournament_draft($1,$2,$3::jsonb)',
+    ['Unified update',`unified-update-${++slug}`,JSON.stringify(E.createDefaultState())])).rows[0];
+  assert.equal(privateDraft.public_read,false);
+  assert.equal((await as('anon',null,'SELECT id FROM public.tournaments WHERE id=$1',[privateDraft.id])).rows.length,0);
+  await assert.rejects(reset(published,users.editor),/owner_required/);
+  const resetLike=copy(published.state);resetLike.matches=[];
+  await assert.rejects(save(published,resetLike),/tournament_structure_locked/);
+  const cleared=await reset(published);
+  assert.equal(cleared.public_read,false);
+  assert.equal(cleared.state.matches.length,0);
+});
+
+test('SQL delivery files are complete compact scripts with named body delimiters and final verification',()=>{
+  for(const [name,maxLines,check] of [
+    ['MIGRATION_RESET_BRACKET_V13_3.sql',85,'RESET_INSTALLATO'],
+    ['00_AGGIORNAMENTO_SUPABASE.sql',94,'AGGIORNAMENTO_COMPLETATO'],
+  ]){
+    const source=fs.readFileSync(path.join(root,name),'utf8');
+    assert.ok(source.trimEnd().split('\n').length<=maxLines,name);
+    assert.ok(source.startsWith('-- INIZIO FILE COMPLETO: '+name));
+    assert.ok(source.trimEnd().endsWith('-- FINE FILE COMPLETO: '+name));
+    assert.ok(!source.includes('$$'),'function bodies use named delimiters');
+    for(const delimiter of ['$guard_reset$','$reset_bracket$'])assert.equal(source.split(delimiter).length-1,2,delimiter);
+    if(name.startsWith('00_'))assert.equal(source.split('$shared_draft$').length-1,2);
+    assert.ok(source.indexOf(check)>source.lastIndexOf('commit;'));
+  }
 });

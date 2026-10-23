@@ -1,19 +1,21 @@
-# Beach & Chill · Glow Arena 13.3
+# Beach & Chill · Glow Arena 13.3.1
 
 Applicazione web responsive per organizzare tornei di beach volley, gestire squadre e risultati e condividere la vista Live con i giocatori. Frontend statico su Vercel; autenticazione, database e aggiornamenti su Supabase.
 
 ## Parti da qui
 
-La **13.3 permette al proprietario di eliminare esplicitamente il tabellone anche dopo l’avvio e la pubblicazione**, con conferma e backup locale obbligatorio. Il torneo torna una bozza privata, conservando squadre, impostazioni, chiave e accessi admin. Segui **[Eliminazione del tabellone e aggiornamento 13.3](docs/ELIMINAZIONE_TABELLONE_V13_3.md)**: prima del deploy esegui `MIGRATION_RESET_BRACKET_V13_3.sql`; se non hai ancora installato la 13.2, applica prima anche `MIGRATION_SHARED_DRAFT_V13_2.sql`.
+La **13.3.1** include tutte le funzioni della 13.3 e semplifica l’installazione: **ZIP con i file subito nella radice** e **un solo aggiornamento SQL completo**, `00_AGGIORNAMENTO_SUPABASE.sql`, che include le migrazioni della 13.2 e della 13.3. Segui **[Installazione 13.3.1 passo per passo](docs/INSTALLAZIONE_13_3_1.md)** prima di aggiornare GitHub/Vercel. Scarica e apri il file SQL completo: una copia parziale dall’anteprima non è sufficiente.
+
+Il proprietario può eliminare esplicitamente il tabellone anche dopo l’avvio e la pubblicazione, con conferma e backup locale obbligatorio. Il torneo torna una bozza privata, conservando squadre, impostazioni, chiave e accessi admin. La **[guida all’eliminazione del tabellone](docs/ELIMINAZIONE_TABELLONE_V13_3.md)** descrive la funzione; per installare questa versione usa il file SQL unico e la nuova guida sopra indicati.
 
 La bozza privata condivisa tra admin della 13.2 è inclusa: consulta **[Bozza condivisa e accessi](docs/BOZZA_CONDIVISA_V13_2.md)** per lavorare sullo stesso torneo con account personali.
 
 Il calendario dei nuovi tornei fa avanzare i gironi in parallelo: con due campi e due gironi usa Campo 1 per A e Campo 2 per B; con più gironi alterna i gruppi tra gli slot. I tornei già avviati conservano il calendario esistente.
 
-La correzione dei salvataggi della 13.1 è inclusa: la relativa [guida](docs/CORREZIONE_SALVATAGGI_V13_1.md) spiega salvataggio locale, sincronizzazione online e conferma dei punteggi. Per installare la **13.3** segui prima la guida corrente e le migrazioni sopra indicate.
+La correzione dei salvataggi della 13.1 è inclusa: la relativa [guida](docs/CORREZIONE_SALVATAGGI_V13_1.md) spiega salvataggio locale, sincronizzazione online e conferma dei punteggi. Per installare la **13.3.1** segui la nuova guida e il file SQL unico sopra indicati.
 
 1. Leggi **[Guida Supabase + Vercel](docs/GUIDA_SUPABASE_VERCEL.md)** per installazione, amministratori e pubblicazione.
-2. Per un database precedente alla 11 segui prima **[Aggiornamento senza perdita di dati](docs/AGGIORNAMENTO_V11.md)**, poi applica in ordine le migrazioni della **[13.2](docs/BOZZA_CONDIVISA_V13_2.md)** e della **[13.3](docs/ELIMINAZIONE_TABELLONE_V13_3.md)** prima del deploy.
+2. Per un database precedente alla 11 segui prima **[Aggiornamento senza perdita di dati](docs/AGGIORNAMENTO_V11.md)**, poi usa **[Installazione 13.3.1](docs/INSTALLAZIONE_13_3_1.md)** e il file SQL unico prima del deploy.
 3. Segui **[Manuale operativo](docs/MANUALE_OPERATIVO.md)** per iscrizioni, avvio, punteggi e correzioni.
 
 ## Regola operativa del torneo
