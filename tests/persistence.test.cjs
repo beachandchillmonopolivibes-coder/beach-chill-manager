@@ -90,7 +90,7 @@ class Element {
   get innerHTML() { return this.html || ''; }
 }
 
-function harness({ storage = new Storage(), configured = false, row = null, save, create, userId = 'admin-1', backend = 'https://qa.supabase.co' } = {}) {
+function harness({ storage = new Storage(), configured = false, row = null, save, create, reset, confirm = true, role = 'owner', userId = 'admin-1', backend = 'https://qa.supabase.co' } = {}) {
   const elements = new Map(), timers = new Map(); let timerId = 0;
   const document = {
     readyState: 'loading', activeElement: null, visibilityState: 'visible', rows: [], listeners: new Map(),
@@ -107,12 +107,13 @@ function harness({ storage = new Storage(), configured = false, row = null, save
   const template = document.getElementById('matchTemplate');
   template.content = { cloneNode() { const fragment = new Element(document); fragment.children.set('.match-card', new Element(document, { classes: 'match-card' })); return fragment; } };
   const location = { href: 'https://example.invalid/?t=persistence-qa', search: '?t=persistence-qa', protocol: 'https:' };
-  const server = { row: row ? json(row) : null, calls: [], creates: [] };
+  const server = { row: row ? json(row) : null, calls: [], creates: [], resets: [], visibilityChanges: [] };
+  const confirmations = [];
   const DB = {
     isConfigured: () => configured, init() {},
     getSession: async () => configured ? { user: { id: userId, email: 'qa@admin.beachvolley.app' } } : null,
     onAuthStateChange() {}, sessionUsername: () => 'qa',
-    getMyRole: async () => 'owner', listTournamentAdmins: async () => [],
+    getMyRole: async () => role, listTournamentAdmins: async () => [],
     loadTournamentBySlug: async () => server.row ? json(server.row) : null,
     subscribeToTournament() {}, unsubscribe() {},
     async createTournament(name, slug, state) {
@@ -128,9 +129,26 @@ function harness({ storage = new Storage(), configured = false, row = null, save
       server.row = { ...server.row, state: json(state), revision: revision + 1 };
       return json(server.row);
     },
+    async resetTournamentBracket(id, revision) {
+      const call = { id, revision }; server.resets.push(call);
+      if (reset) return reset(call, server);
+      if (role !== 'owner') throw new Error('owner_required');
+      if (revision !== server.row.revision) throw new Error('revision_conflict');
+      const cleared = json(server.row.state);
+      window.BeachEngine.resetTournament(cleared, { allowStarted: true });
+      server.row = { ...server.row, state: cleared, revision: revision + 1, public_read: false };
+      return json(server.row);
+    },
+    async setPublicRead(id, publicRead) {
+      server.visibilityChanges.push({ id, publicRead });
+      if (role !== 'owner') throw new Error('owner_required');
+      server.row = { ...server.row, public_read: publicRead, revision: server.row.revision + 1 };
+      return json(server.row);
+    },
   };
   const windowListeners = new Map();
   const window = { crypto: webcrypto, structuredClone, BEACH_APP_CONFIG: { defaultTournamentSlug: 'persistence-qa', supabaseUrl: backend }, BeachDB: DB, location,
+    __testConfirm: confirm, __testConfirmations: confirmations,
     addEventListener(type, listener) { const list = windowListeners.get(type) || []; list.push(listener); windowListeners.set(type, list); },
     scrollY: 0, innerHeight: 900, matchMedia: () => ({ matches: false }), scrollTo() {} };
   const context = vm.createContext({ window, document, localStorage: storage, sessionStorage: new Storage(), location, navigator: {}, history: { replaceState() {} },
@@ -148,10 +166,17 @@ function harness({ storage = new Storage(), configured = false, row = null, save
     const originalRenderAll = renderAll;
     let testPaintCount = 0;
     renderAll = (...args) => { testPaintCount += 1; return originalRenderAll(...args); };
+    confirmAction = async (...args) => {
+      window.__testConfirmations.push(args);
+      return typeof window.__testConfirm === 'function' ? window.__testConfirm(...args) : window.__testConfirm;
+    };
     window.__app = {
       start: bootstrap, bindEvents: originalBindEvents, renderTeamRows, renderMatchCard,
       flushOnlineSave, loadOnlineTournament, saveLocalState, noteLocalEdit, createOnlineTournament, hasUnsavedLocalChanges,
       mergeRosterState, tryApplyRosterUpdate, handleRealtimeUpdate,
+      resetTournament, togglePublicRead,
+      canResetBracket: typeof canResetBracket === 'function' ? canResetBracket : undefined,
+      readLastResetBackup: typeof readLastResetBackup === 'function' ? readLastResetBackup : undefined,
       tab: value => value ? (activeTab = value) : activeTab,
       pending: () => pendingRealtimeRow,
       paints: () => testPaintCount,
@@ -163,7 +188,7 @@ function harness({ storage = new Storage(), configured = false, row = null, save
   })();`;
   vm.runInContext(source.slice(0, boot) + adapter, context);
   const api = window.__app;
-  return { api, Engine: window.BeachEngine, document, elements, storage, server, timers,
+  return { api, Engine: window.BeachEngine, document, elements, storage, server, timers, confirmations,
     async fireWindow(type) { for (const listener of windowListeners.get(type) || []) await listener({ type }); },
     stored: () => JSON.parse(storage.getItem(storageKey)),
     draft: () => JSON.parse(storage.getItem(storageKey + ':draft')),
@@ -566,4 +591,184 @@ test('an incomplete focused seed keeps its raw draft when the other admin change
   assert.equal(seed.value, '-', 'a remote change must not overwrite an incomplete local input');
   assert.equal(app.document.activeElement, seed); assert.equal(app.document.rows[0].querySelector('.seed-input'), seed);
   assert.equal(app.api.pending()?.revision, 2, 'the incoming change remains queued until the editor can reconcile it');
+});
+
+function rosterIdentity(state) { return json(state.teams.map(({ id, name, seed, manualGroup }) => ({ id, name, seed, manualGroup }))); }
+
+function assertClearedBracket(state, before) {
+  assert.equal(state.matches.length, 0); assert.equal(state.groups.length, 0);
+  assert.equal(state.qualifiers.length, 0); assert.equal(state.silverQualifiers.length, 0);
+  assert.equal(state.championId, null); assert.equal(state.silverChampionId, null);
+  assert.equal(Boolean(state.metadata.startedAt), false, 'the reset returns an editable draft');
+  assert.deepEqual(rosterIdentity(state), rosterIdentity(before), 'all original entrants and seed assignments are preserved');
+  for (const field of ['tournamentName', 'format', 'courts', 'slotMinutes', 'eventDate', 'dayStart', 'dayEnd']) assert.deepEqual(state.settings[field], before.settings[field], `user configuration ${field} is retained`);
+  assert.equal(state.settings.draw.code, null, 'the discarded draw is no longer presented as current');
+}
+
+test('the owner deletes a published bracket through its dedicated RPC and keeps a complete pre-reset backup', async () => {
+  const initial = harness(); const original = tournament(initial.Engine); const published = rowFor(original, 7);
+  const app = harness({ configured: true, row: published }); await app.api.start();
+  const before = json(app.api.state());
+  assert.equal(app.api.canResetBracket(), true);
+  await app.api.resetTournament();
+  assert.deepEqual(app.server.resets, [{ id: 'tournament-1', revision: 7 }]);
+  assert.equal(app.server.calls.length, 0, 'resetting a started bracket cannot use the normal state-save route');
+  assertClearedBracket(app.api.state(), before);
+  assert.equal(app.api.online().tournament.public_read, false, 'the cleared event is private until explicitly published again');
+  assert.equal(app.api.online().tournament.id, published.id); assert.equal(app.api.online().role, 'owner');
+  const backup = app.api.readLastResetBackup();
+  assert.deepEqual(json(backup.state), before, 'the backup retains every match and result from before deletion');
+  assert.equal(backup.revision, 7); assert.equal(backup.publicRead, true); assert.equal(backup.userId, 'admin-1');
+  assert.equal(app.api.canResetBracket(), false, 'there is no bracket left to delete');
+});
+
+test('cancelling bracket deletion leaves the published tournament and its existing matches untouched', async () => {
+  const initial = harness(); const original = tournament(initial.Engine);
+  const app = harness({ configured: true, row: rowFor(original), confirm: false }); await app.api.start();
+  const before = json(app.api.state());
+  await app.api.resetTournament();
+  assert.equal(app.confirmations.length, 1); assert.equal(app.server.resets.length, 0); assert.equal(app.server.calls.length, 0);
+  assert.deepEqual(json(app.api.state()), before); assert.equal(app.api.online().tournament.public_read, true);
+  assert.equal(app.api.readLastResetBackup(), null, 'an aborted operation does not create a reset backup');
+});
+
+test('an edit made while deletion confirmation is open prevents the stale reset request', async () => {
+  const initial = harness(); const original = tournament(initial.Engine); let confirmDeletion;
+  const app = harness({ configured: true, row: rowFor(original), confirm: () => new Promise(resolve => { confirmDeletion = resolve; }) }); await app.api.start();
+  const deleting = app.api.resetTournament();
+  assert.equal(typeof confirmDeletion, 'function');
+  app.api.state().teams[0].name = 'Nome modificato durante la conferma'; app.api.noteLocalEdit({ teamIndex: 0 });
+  confirmDeletion(true); await deleting;
+  assert.equal(app.server.resets.length, 0, 'the user must review the changed tournament before confirming again');
+  assert.equal(app.api.state().teams[0].name, 'Nome modificato durante la conferma');
+  assert.ok(app.api.state().matches.length); assert.equal(app.api.readLastResetBackup(), null);
+});
+
+test('a reset revision conflict leaves the old bracket in place and its backup available', async () => {
+  const initial = harness(); const original = tournament(initial.Engine);
+  const app = harness({ configured: true, row: rowFor(original), reset: async () => { throw new Error('revision_conflict'); } }); await app.api.start();
+  const before = json(app.api.state());
+  await app.api.resetTournament();
+  assert.equal(app.server.resets.length, 1); assert.equal(app.server.calls.length, 0);
+  assert.deepEqual(json(app.api.state()), before, 'an unsuccessful server operation cannot clear the editor');
+  assert.deepEqual(json(app.api.readLastResetBackup().state), before);
+  assert.equal(app.api.online().tournament.public_read, true);
+  assert.equal(app.api.online().resetting, false); assert.equal(app.api.online().saving, false); assert.equal(app.document.getElementById('mainContent').inert, false);
+});
+
+test('an ordinary editor cannot delete a published bracket even by calling the action directly', async () => {
+  const initial = harness(); const original = tournament(initial.Engine);
+  const app = harness({ configured: true, row: rowFor(original), role: 'editor', userId: 'admin-2' }); await app.api.start();
+  const before = json(app.api.state());
+  assert.equal(app.api.canResetBracket(), false);
+  await app.api.resetTournament();
+  assert.equal(app.confirmations.length, 0); assert.equal(app.server.resets.length, 0);
+  assert.deepEqual(json(app.api.state()), before); assert.equal(app.api.readLastResetBackup(), null);
+});
+
+test('a failed protective backup prevents bracket deletion from reaching the server', async () => {
+  const initial = harness(); const original = tournament(initial.Engine); const storage = new Storage();
+  const app = harness({ configured: true, row: rowFor(original), storage }); await app.api.start();
+  const before = json(app.api.state()); const persist = storage.setItem.bind(storage);
+  storage.setItem = (key, value) => { if (key.includes(':reset-backup:')) throw new Error('QuotaExceededError'); persist(key, value); };
+  await app.api.resetTournament();
+  assert.equal(app.server.resets.length, 0, 'the destructive RPC is not sent without a durable backup');
+  assert.deepEqual(json(app.api.state()), before); assert.equal(app.api.online().tournament.public_read, true);
+  assert.match(app.document.getElementById('toast').textContent, /Backup non riuscito/);
+  assert.equal(app.api.readLastResetBackup(), null);
+});
+
+test('local deletion can reset a started tournament while preserving its roster and recoverable backup', async () => {
+  const app = harness(); app.api.replaceState(tournament(app.Engine)); app.api.saveLocalState();
+  const before = json(app.api.state());
+  assert.equal(app.api.canResetBracket(), true);
+  await app.api.resetTournament();
+  assertClearedBracket(app.api.state(), before);
+  assert.equal(app.server.resets.length, 0); assert.equal(app.server.calls.length, 0);
+  assert.deepEqual(json(app.api.readLastResetBackup().state), before);
+  const reopened = harness({ storage: app.storage });
+  assertClearedBracket(reopened.api.state(), before);
+  assert.deepEqual(json(reopened.api.readLastResetBackup().state), before, 'the backup remains available after reloading the cleared local event');
+});
+
+test('pending valid edits are saved before deletion and the reset uses the acknowledged revision', async () => {
+  const initial = harness(); const original = tournament(initial.Engine);
+  const app = harness({ configured: true, row: rowFor(original, 3) }); await app.api.start();
+  app.api.state().teams[0].name = 'Nome corretto da conservare'; app.api.noteLocalEdit({ teamIndex: 0 });
+  await app.api.resetTournament();
+  assert.equal(app.server.calls.length, 1, 'the pending name is committed before deletion confirmation');
+  assert.deepEqual(app.server.resets, [{ id: 'tournament-1', revision: 4 }]);
+  assert.equal(app.api.state().teams[0].name, 'Nome corretto da conservare');
+  assert.equal(app.api.readLastResetBackup().state.teams[0].name, 'Nome corretto da conservare');
+  assert.equal(app.api.hasUnsavedLocalChanges(), false);
+});
+
+test('an in-flight bracket reset freezes editing and rejects duplicate deletion requests', async () => {
+  const initial = harness(); const original = tournament(initial.Engine); let releaseReset, notifyEntered;
+  const entered = new Promise(resolve => { notifyEntered = resolve; });
+  const app = harness({ configured: true, row: rowFor(original), reset: (call, server) => new Promise(resolve => {
+    releaseReset = () => {
+      const cleared = json(server.row.state); app.Engine.resetTournament(cleared, { allowStarted: true });
+      server.row = { ...server.row, state: cleared, public_read: false, revision: call.revision + 1 }; resolve(json(server.row));
+    };
+    notifyEntered();
+  }) });
+  await app.api.start(); const pending = app.api.resetTournament(); await entered;
+  assert.equal(app.api.online().resetting, true); assert.equal(app.api.online().saving, true);
+  assert.equal(app.document.getElementById('mainContent').inert, true); assert.equal(app.api.canResetBracket(), false);
+  assert.ok(app.api.state().matches.length, 'the bracket is displayed until the server confirms deletion');
+  await app.api.resetTournament();
+  assert.equal(app.server.resets.length, 1, 'double activation cannot send a second destructive request');
+  assert.equal(app.confirmations.length, 1);
+  releaseReset(); await pending;
+  assert.equal(app.api.online().resetting, false); assert.equal(app.api.online().saving, false); assert.equal(app.document.getElementById('mainContent').inert, false);
+  assertClearedBracket(app.api.state(), original);
+});
+
+test('a reset response from the previous account cannot restore its tournament after an account change', async () => {
+  const initial = harness(); const original = tournament(initial.Engine); let releaseReset, notifyEntered;
+  const entered = new Promise(resolve => { notifyEntered = resolve; });
+  const app = harness({ configured: true, row: rowFor(original), reset: (call, server) => {
+    const previousAccountRow = json(server.row);
+    return new Promise(resolve => {
+      releaseReset = () => {
+        app.Engine.resetTournament(previousAccountRow.state, { allowStarted: true });
+        previousAccountRow.public_read = false; previousAccountRow.revision = call.revision + 1;
+        resolve(previousAccountRow);
+      };
+      notifyEntered();
+    });
+  } });
+  await app.api.start(); const pending = app.api.resetTournament(); await entered;
+  assert.equal(app.api.online().resetting, true);
+  app.api.online().session = { user: { id: 'admin-2', email: 'other@admin.beachvolley.app' } };
+  app.api.online().tournament = null; app.api.online().revision = null; app.api.online().role = null; app.api.online().accessReady = false;
+  app.api.replaceState(app.Engine.createDefaultState());
+  app.server.row = null; // RLS exposes no tournament to the new account.
+  releaseReset(); await pending;
+  assert.equal(app.api.online().session.user.id, 'admin-2', 'the response cannot replace the current session');
+  assert.equal(app.api.online().tournament, null); assert.equal(app.api.online().revision, null);
+  assert.equal(app.api.state().teams.filter(team => team.name.trim()).length, 0, 'entrants from the previous account remain inaccessible');
+  assert.equal(app.api.state().matches.length, 0);
+  assert.equal(app.api.online().resetting, false); assert.equal(app.api.online().saving, false);
+  assert.equal(app.document.getElementById('mainContent').inert, false);
+  assert.equal(app.api.readLastResetBackup(), null, 'the previous owner’s backup is not exposed to the new account');
+});
+
+test('publishing and unpublishing the Live view re-enables the owner’s bracket deletion button after each save', async () => {
+  const initial = harness(); const original = tournament(initial.Engine);
+  const app = harness({ configured: true, row: privateRow(original) }); await app.api.start();
+  const button = app.document.getElementById('resetTournamentBtn'); const toggle = app.document.getElementById('publicReadToggle');
+  assert.equal(app.api.canResetBracket(), true); assert.equal(button.disabled, false);
+  for (const requested of [true, false]) {
+    toggle.checked = requested;
+    await app.api.togglePublicRead({ target: toggle });
+    assert.equal(app.api.online().tournament.public_read, requested);
+    assert.equal(app.api.online().saving, false); assert.equal(toggle.disabled, false);
+    assert.equal(app.api.canResetBracket(), true);
+    assert.equal(button.disabled, false, 'the UI cannot retain the disabled state painted while the visibility save was in flight');
+    assert.ok(app.api.state().matches.length, 'changing visibility does not clear the bracket');
+  }
+  assert.deepEqual(app.server.visibilityChanges.map(call => call.publicRead), [true, false]);
+  assert.equal(app.server.resets.length, 0);
 });

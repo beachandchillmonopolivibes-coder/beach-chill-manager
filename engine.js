@@ -2342,9 +2342,11 @@
     return state;
   }
 
-  function resetTournament(state) {
-    assertDraft(state);
+  function resetTournament(state, { allowStarted = false } = {}) {
+    if (!allowStarted) assertDraft(state);
     clearCompetition(state);
+    state.metadata.startedAt = null;
+    state.metadata.scheduleWarnings = [];
     state.metadata.updatedAt = nowIso();
     return state;
   }

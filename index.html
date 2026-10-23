@@ -24,10 +24,10 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="style.css?v=13.2" />
-  <link rel="stylesheet" href="hmi-v10.css?v=13.2" />
-  <link rel="stylesheet" href="professional.css?v=13.2" />
-  <link rel="stylesheet" href="arena.css?v=13.2" />
+  <link rel="stylesheet" href="style.css?v=13.3" />
+  <link rel="stylesheet" href="hmi-v10.css?v=13.3" />
+  <link rel="stylesheet" href="professional.css?v=13.3" />
+  <link rel="stylesheet" href="arena.css?v=13.3" />
 </head>
 <body>
   <a class="skip-link" href="#mainContent">Vai al contenuto</a>
@@ -510,8 +510,8 @@
 
           <section class="card editor-only danger-card">
             <div class="card-heading"><div><p class="overline">Operazioni irreversibili</p><h2>Reset</h2></div></div>
-            <p class="body-copy">Dopo l’avvio il tabellone è protetto. Puoi correggere i singoli risultati in ogni fase; per un altro evento crea un nuovo torneo.</p>
-            <div class="button-stack"><button class="button secondary" id="resetScoresBtn" type="button">Azzera risultati</button><button class="button danger" id="resetTournamentBtn" type="button">Elimina tabellone</button></div>
+            <p class="body-copy" id="resetBracketNotice">Il proprietario può eliminare il tabellone anche dopo la pubblicazione. Le squadre restano iscritte e il torneo torna in preparazione con Live disattivato.</p>
+            <div class="button-stack"><button class="button secondary" id="resetScoresBtn" type="button">Azzera risultati</button><button class="button danger" id="resetTournamentBtn" type="button">Elimina tabellone</button><button class="button secondary hidden" id="downloadResetBackupBtn" type="button">Scarica backup prima dell’eliminazione</button></div>
           </section>
 
           <section class="card">
@@ -561,11 +561,11 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="vendor/supabase.js?v=13.2"></script>
-  <script src="config.js?v=13.2"></script>
-  <script src="engine.js?v=13.2"></script>
-  <script src="db.js?v=13.2"></script>
-  <script src="app.js?v=13.2"></script>
+  <script src="vendor/supabase.js?v=13.3"></script>
+  <script src="config.js?v=13.3"></script>
+  <script src="engine.js?v=13.3"></script>
+  <script src="db.js?v=13.3"></script>
+  <script src="app.js?v=13.3"></script>
 
 
 </body>

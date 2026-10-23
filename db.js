@@ -164,6 +164,23 @@
     return Array.isArray(data) ? data[0] : data;
   }
 
+  async function resetTournamentBracket(tournamentId, expectedRevision) {
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) throw new Error('revision_conflict');
+    const c = getClient();
+    if (!c) throw new Error('Supabase non configurato.');
+    const { data, error } = await c.rpc('reset_tournament_bracket', {
+      p_tournament_id: tournamentId,
+      p_expected_revision: expectedRevision,
+    });
+    if (error) {
+      if (['PGRST202', '42883'].includes(error.code) && String(error.message || '').includes('reset_tournament_bracket')) {
+        throw new Error('reset_bracket_migration_required');
+      }
+      throw error;
+    }
+    return Array.isArray(data) ? data[0] : data;
+  }
+
   async function addTournamentAdmin(tournamentId, username) {
     const c = getClient();
     if (!c) throw new Error('Supabase non configurato.');
@@ -252,6 +269,7 @@
     getMyRole,
     createTournament,
     saveTournamentState,
+    resetTournamentBracket,
     addTournamentAdmin,
     listTournamentAdmins,
     removeTournamentAdmin,

@@ -1,22 +1,24 @@
-# Beach & Chill · Glow Arena 13.2
+# Beach & Chill · Glow Arena 13.3
 
 Applicazione web responsive per organizzare tornei di beach volley, gestire squadre e risultati e condividere la vista Live con i giocatori. Frontend statico su Vercel; autenticazione, database e aggiornamenti su Supabase.
 
 ## Parti da qui
 
-La **13.2 aggiunge la bozza online privata e condivisa tra gli admin**, anche prima dell’avvio del torneo. Prima di pubblicare questa versione, esegui una volta **`MIGRATION_SHARED_DRAFT_V13_2.sql`** nel SQL Editor del tuo progetto Supabase, poi segui **[Bozza condivisa: aggiornamento e accessi](docs/BOZZA_CONDIVISA_V13_2.md)**.
+La **13.3 permette al proprietario di eliminare esplicitamente il tabellone anche dopo l’avvio e la pubblicazione**, con conferma e backup locale obbligatorio. Il torneo torna una bozza privata, conservando squadre, impostazioni, chiave e accessi admin. Segui **[Eliminazione del tabellone e aggiornamento 13.3](docs/ELIMINAZIONE_TABELLONE_V13_3.md)**: prima del deploy esegui `MIGRATION_RESET_BRACKET_V13_3.sql`; se non hai ancora installato la 13.2, applica prima anche `MIGRATION_SHARED_DRAFT_V13_2.sql`.
+
+La bozza privata condivisa tra admin della 13.2 è inclusa: consulta **[Bozza condivisa e accessi](docs/BOZZA_CONDIVISA_V13_2.md)** per lavorare sullo stesso torneo con account personali.
 
 Il calendario dei nuovi tornei fa avanzare i gironi in parallelo: con due campi e due gironi usa Campo 1 per A e Campo 2 per B; con più gironi alterna i gruppi tra gli slot. I tornei già avviati conservano il calendario esistente.
 
-La correzione dei salvataggi della 13.1 è inclusa: la relativa [guida](docs/CORREZIONE_SALVATAGGI_V13_1.md) spiega salvataggio locale, sincronizzazione online e conferma dei punteggi. Per installare la **13.2** segui però prima la nuova guida e la nuova migrazione sopra indicate.
+La correzione dei salvataggi della 13.1 è inclusa: la relativa [guida](docs/CORREZIONE_SALVATAGGI_V13_1.md) spiega salvataggio locale, sincronizzazione online e conferma dei punteggi. Per installare la **13.3** segui prima la guida corrente e le migrazioni sopra indicate.
 
 1. Leggi **[Guida Supabase + Vercel](docs/GUIDA_SUPABASE_VERCEL.md)** per installazione, amministratori e pubblicazione.
-2. Per un database precedente alla 11 segui prima **[Aggiornamento senza perdita di dati](docs/AGGIORNAMENTO_V11.md)**, poi applica la migrazione della **[13.2](docs/BOZZA_CONDIVISA_V13_2.md)** prima del deploy.
+2. Per un database precedente alla 11 segui prima **[Aggiornamento senza perdita di dati](docs/AGGIORNAMENTO_V11.md)**, poi applica in ordine le migrazioni della **[13.2](docs/BOZZA_CONDIVISA_V13_2.md)** e della **[13.3](docs/ELIMINAZIONE_TABELLONE_V13_3.md)** prima del deploy.
 3. Segui **[Manuale operativo](docs/MANUALE_OPERATIVO.md)** per iscrizioni, avvio, punteggi e correzioni.
 
 ## Regola operativa del torneo
 
-**Prima dell’avvio** puoi preparare squadre, teste di serie, gironi, formula e impostazioni. **Dal primo avvio** l’organico e la struttura sono bloccati: si possono correggere nomi delle squadre e punteggi in qualsiasi fase, oltre ad avanzare il torneo. Una correzione che cambia gli accoppiamenti richiede conferma e annulla i turni successivi interessati. Per un organico diverso crea un nuovo torneo.
+**Prima dell’avvio** puoi preparare squadre, teste di serie, gironi, formula e impostazioni. **Dal primo avvio** l’organico e la struttura sono bloccati: si possono correggere nomi delle squadre e punteggi in qualsiasi fase, oltre ad avanzare il torneo. Una correzione che cambia gli accoppiamenti richiede conferma e annulla i turni successivi interessati. Per ripartire con lo stesso torneo il proprietario può usare **Altro → Reset → Elimina tabellone**, con conferma e backup: questa operazione esplicita riapre la preparazione e disattiva il Live pubblico. Le normali modifiche al torneo avviato mantengono i blocchi descritti sopra.
 
 Gli accessi sono individuali: il proprietario gestisce gli amministratori; gli amministratori autorizzati gestiscono il torneo; il link Live permette sola lettura. Il database applica i controlli di accesso e il blocco della struttura anche alle chiamate dirette.
 
@@ -29,6 +31,7 @@ Gli accessi sono individuali: il proprietario gestisce gli amministratori; gli a
 - Formati distinti per gironi, turni eliminatori e semifinali; finali 21/21/15.
 - Risultati con validazione, classifiche, tabelloni e avanzamento dei turni.
 - Backup JSON e vista Live per pubblico e giocatori.
+- Eliminazione esplicita del tabellone riservata al proprietario online, con backup locale prima del reset.
 - Interfaccia adattata a telefono e desktop, temi chiaro/scuro, installazione PWA.
 
 ## Prova locale

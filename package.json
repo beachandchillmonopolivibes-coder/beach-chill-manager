@@ -1,6 +1,6 @@
 {
   "name": "beach-chill-tournament-manager",
-  "version": "13.2.0",
+  "version": "13.3.0",
   "private": true,
   "description": "Beach & Chill Glow Arena: gestione tornei con Supabase e vista Live",
   "scripts": {
