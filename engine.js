@@ -2312,8 +2312,8 @@
     return { state, removedMatchIds, standingsChanged };
   }
 
-  function resetScores(state) {
-    assertDraft(state);
+  function resetScores(state, { allowStarted = false } = {}) {
+    if (!allowStarted) assertDraft(state);
     if (!state.matches.length) return state;
     state.matches = state.matches.filter((match) => match.stage === 0);
     state.matches.forEach((match) => {
@@ -2322,8 +2322,10 @@
         match.winnerId = null;
         match.loserId = null;
       }
-      match.court = '';
-      match.startTime = '';
+      if (!allowStarted) {
+        match.court = '';
+        match.startTime = '';
+      }
       match.updatedAt = nowIso();
     });
     state.stage = 0;
@@ -2337,7 +2339,9 @@
     const initialBye = state.settings.byePolicy.history.find((entry) => entry.kind === 'initial');
     state.settings.byePolicy.lastTeamId = initialBye?.teamId || null;
     state.settings.byePolicy.cursor = 0;
-    autoScheduleStage(state, 0, { force: true });
+    if (!allowStarted) autoScheduleStage(state, 0, { force: true });
+    else state.metadata.scheduleWarnings = (state.metadata.scheduleWarnings || [])
+      .filter((entry) => state.matches.some((match) => match.id === entry.matchId));
     recomputeTeams(state);
     return state;
   }

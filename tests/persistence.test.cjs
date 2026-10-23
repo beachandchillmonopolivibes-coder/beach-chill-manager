@@ -10,7 +10,7 @@ const { webcrypto } = require('node:crypto');
 const root = path.resolve(__dirname, '..');
 const storageKey = 'beach-volley-manager-v6:persistence-qa';
 const setupIds = new Set(['tournamentNameInput', 'courtsInput', 'slotMinutesInput', 'eventDateInput', 'dayStartInput', 'dayEndInput', 'drawCodeInput']);
-const inputIds = new Set([...setupIds, 'teamSearch', 'onlineTournamentName', 'onlineTournamentSlug', 'adminTournamentKey', 'newAdminUsername']);
+const inputIds = new Set([...setupIds, 'teamSearch', 'onlineTournamentName', 'onlineTournamentSlug', 'adminTournamentKey', 'newAdminUsername', 'importInput']);
 const json = value => JSON.parse(JSON.stringify(value));
 
 class Storage {
@@ -25,7 +25,7 @@ class Element {
     this.document = document; this.id = id; this.tagName = tag.toUpperCase();
     this.parentElement = parent; this.selectionStart = 0; this.selectionEnd = 0; this.selectionDirection = 'none';
     this.className = classes; this.dataset = {}; this.value = ''; this.textContent = '';
-    this.disabled = false; this.readOnly = false; this.checked = false; this.options = [];
+    this.disabled = false; this.readOnly = false; this.checked = false; this.options = []; this.clickCalls = 0;
     this.listeners = new Map(); this.children = new Map(); this.attributes = new Map();
     const classesSet = new Set(classes.split(/\s+/).filter(Boolean));
     this.classList = {
@@ -67,6 +67,7 @@ class Element {
   }
   focus() { this.document.activeElement = this; }
   blur() { this.document.activeElement = null; }
+  click() { this.clickCalls += 1; if (!this.disabled) return this.fire('click'); }
   setSelectionRange(start, end, direction = 'none') { this.selectionStart = start; this.selectionEnd = end; this.selectionDirection = direction; }
   contains(element) { let candidate = element; while (candidate) { if (candidate === this) return true; candidate = candidate.parentElement; } return false; }
   scrollIntoView() {}
@@ -174,7 +175,8 @@ function harness({ storage = new Storage(), configured = false, row = null, save
       start: bootstrap, bindEvents: originalBindEvents, renderTeamRows, renderMatchCard,
       flushOnlineSave, loadOnlineTournament, saveLocalState, noteLocalEdit, createOnlineTournament, hasUnsavedLocalChanges,
       mergeRosterState, tryApplyRosterUpdate, handleRealtimeUpdate,
-      resetTournament, togglePublicRead,
+      resetTournament, resetScores, togglePublicRead,
+      updateResetControls: typeof updateResetControls === 'function' ? updateResetControls : undefined,
       canResetBracket: typeof canResetBracket === 'function' ? canResetBracket : undefined,
       readLastResetBackup: typeof readLastResetBackup === 'function' ? readLastResetBackup : undefined,
       tab: value => value ? (activeTab = value) : activeTab,
@@ -674,7 +676,8 @@ test('a failed protective backup prevents bracket deletion from reaching the ser
   await app.api.resetTournament();
   assert.equal(app.server.resets.length, 0, 'the destructive RPC is not sent without a durable backup');
   assert.deepEqual(json(app.api.state()), before); assert.equal(app.api.online().tournament.public_read, true);
-  assert.match(app.document.getElementById('toast').textContent, /Backup non riuscito/);
+  assert.match(app.document.getElementById('resetStatus').textContent, /Backup non riuscito/);
+  assert.equal(app.document.getElementById('resetStatus').classList.contains('hidden'), false);
   assert.equal(app.api.readLastResetBackup(), null);
 });
 
@@ -767,8 +770,121 @@ test('publishing and unpublishing the Live view re-enables the owner’s bracket
     assert.equal(app.api.online().saving, false); assert.equal(toggle.disabled, false);
     assert.equal(app.api.canResetBracket(), true);
     assert.equal(button.disabled, false, 'the UI cannot retain the disabled state painted while the visibility save was in flight');
+    assert.equal(app.document.getElementById('resetScoresBtn').disabled, false, 'score reset becomes available again after the visibility save');
     assert.ok(app.api.state().matches.length, 'changing visibility does not clear the bracket');
   }
   assert.deepEqual(app.server.visibilityChanges.map(call => call.publicRead), [true, false]);
   assert.equal(app.server.resets.length, 0);
+});
+
+function scoredGroupsWithPlayoffs(Engine) {
+  const state = Engine.createDefaultState(); state.settings.format = Engine.FORMATS.GROUPS_PLAYOFF;
+  Object.assign(state.settings.formatOptions, { groupCount: 2, playoffSize: 4, protectGroupWinners: false, silverEnabled: false });
+  state.teams.forEach((team, index) => { team.name = index < 8 ? `Coppia ${index + 1}` : ''; });
+  Engine.generateTournament(state, { drawCode: 'RESET-SCORES-UI' });
+  state.matches[0].court = 'Campo personalizzato'; state.matches[0].startTime = '10:35';
+  for (const match of [...Engine.currentStageMatches(state)]) {
+    if (match.bye) continue;
+    const rule = Engine.matchRuleDefinition(match);
+    const sets = [{ a: '', b: '' }, { a: '', b: '' }, { a: '', b: '' }];
+    for (let index = 0; index < (rule.bestOf === 1 ? 1 : 2); index++) sets[index] = { a: String(rule.targets[index]), b: '5' };
+    Engine.updateMatchScores(state, match.id, sets);
+  }
+  Engine.generateNextStage(state);
+  const later = Engine.currentStageMatches(state).find(match => !match.bye);
+  Engine.updateMatchScores(state, later.id, [{ a: '4', b: '2' }, { a: '', b: '' }, { a: '', b: '' }]);
+  assert.ok(state.matches.some(match => match.stage > 0));
+  assert.ok(state.groups.length); assert.ok(state.matches.some(match => match.stage === 0 && match.winnerId));
+  return state;
+}
+
+function openingSchedule(state) { return json(state.matches.filter(match => match.stage === 0).map(({ id, aId, bId, rule, court, startTime }) => ({ id, aId, bId, rule, court, startTime }))); }
+
+test('the Azzera risultati button clears a started published event through CAS while retaining draw and opening schedule', async () => {
+  const initial = harness(); const original = scoredGroupsWithPlayoffs(initial.Engine);
+  const app = harness({ configured: true, row: rowFor(original, 6) }); await app.api.start(); app.api.bindEvents();
+  const before = json(app.api.state()); const button = app.document.getElementById('resetScoresBtn');
+  assert.equal(button.disabled, false, 'the published event offers the score reset action');
+  await button.fire('click');
+  assert.equal(app.confirmations.length, 1); assert.equal(app.server.calls.length, 1); assert.equal(app.server.calls[0].revision, 6);
+  assert.equal(app.server.resets.length, 0, 'clearing results must not invoke bracket deletion');
+  const current = app.api.state();
+  assert.deepEqual(rosterIdentity(current), rosterIdentity(before));
+  assert.deepEqual(json(current.groups), before.groups); assert.deepEqual(json(current.settings.draw), before.settings.draw);
+  assert.deepEqual(openingSchedule(current), openingSchedule(before), 'original opponents, rules, courts and start times are retained');
+  assert.equal(current.metadata.startedAt, before.metadata.startedAt); assert.equal(app.api.online().tournament.public_read, true);
+  assert.equal(current.matches.length, before.matches.filter(match => match.stage === 0).length);
+  assert.ok(current.matches.every(match => match.stage === 0 && match.sets.every(set => set.a === '' && set.b === '') && (match.bye || !match.winnerId)));
+  assert.equal(current.qualifiers.length, 0); assert.equal(current.silverQualifiers.length, 0); assert.equal(current.championId, null);
+  assert.deepEqual(json(app.api.readLastResetBackup().state), before);
+  assert.equal(button.disabled, false); assert.equal(app.document.getElementById('resetTournamentBtn').disabled, false);
+  assert.equal(app.api.online().saving, false); assert.equal(app.document.getElementById('mainContent').inert, false);
+  assert.match(app.document.getElementById('resetStatus').textContent, /azzerat|risultat/i, 'the completed operation has persistent feedback');
+});
+
+test('cancelling Azzera risultati preserves all scores and keeps the action available', async () => {
+  const initial = harness(); const original = scoredGroupsWithPlayoffs(initial.Engine);
+  const app = harness({ configured: true, row: rowFor(original), confirm: false }); await app.api.start(); app.api.bindEvents();
+  const before = json(app.api.state()); await app.document.getElementById('resetScoresBtn').fire('click');
+  assert.equal(app.confirmations.length, 1); assert.equal(app.server.calls.length, 0); assert.equal(app.server.resets.length, 0);
+  assert.deepEqual(json(app.api.state()), before); assert.equal(app.api.online().tournament.public_read, true);
+  assert.equal(app.document.getElementById('resetScoresBtn').disabled, false);
+});
+
+test('a failed score reset retains the original results and displays a persistent error', async () => {
+  const initial = harness(); const original = scoredGroupsWithPlayoffs(initial.Engine);
+  const app = harness({ configured: true, row: rowFor(original), save: async () => { throw new Error('network unreachable'); } }); await app.api.start();
+  const before = json(app.api.state()); await app.api.resetScores();
+  assert.equal(app.server.calls.length, 1); assert.equal(app.server.resets.length, 0);
+  assert.deepEqual(json(app.api.state()), before); assert.equal(app.api.online().tournament.public_read, true);
+  assert.deepEqual(json(app.api.readLastResetBackup().state), before);
+  const feedback = app.document.getElementById('resetStatus');
+  assert.match(feedback.textContent, /network unreachable|non completat|errore|non riuscit/i);
+  assert.equal(feedback.classList.contains('hidden'), false, 'the explanation stays visible after the transient toast');
+  assert.equal(app.document.getElementById('resetScoresBtn').disabled, false);
+  assert.equal(app.document.getElementById('mainContent').inert, false);
+});
+
+test('the Importa backup button opens the file picker for an editable draft and rejects activation on a started event', async () => {
+  const draft = harness(); await draft.api.start(); draft.api.bindEvents(); draft.api.updateResetControls();
+  const button = draft.document.getElementById('importBackupBtn'); const input = draft.document.getElementById('importInput');
+  assert.equal(button.disabled, false); assert.equal(input.disabled, false);
+  await button.fire('click');
+  assert.equal(input.clickCalls, 1, 'the visible import button activates the separate hidden file input');
+
+  const initial = harness(); const started = harness({ configured: true, row: rowFor(tournament(initial.Engine)) });
+  await started.api.start(); started.api.bindEvents(); started.api.updateResetControls();
+  const lockedButton = started.document.getElementById('importBackupBtn'); const lockedInput = started.document.getElementById('importInput');
+  assert.equal(lockedButton.disabled, true); assert.equal(lockedInput.disabled, true);
+  await lockedButton.fire('click'); // Exercise the handler guard even if invoked synthetically.
+  assert.equal(lockedInput.clickCalls, 0, 'a started shared tournament cannot open a replacement import');
+  assert.ok(started.api.state().matches.length);
+});
+
+test('new score drafts take precedence over a previous successful reset message', async () => {
+  const initial = harness(); const original = scoredGroupsWithPlayoffs(initial.Engine);
+  const app = harness({ configured: true, row: rowFor(original) }); await app.api.start(); await app.api.resetScores();
+  const feedback = app.document.getElementById('resetStatus');
+  assert.match(feedback.textContent, /azzerat/i);
+  app.api.drafts().set(app.api.state().matches[0].id, { sets: [{ a: '3', b: '2' }] });
+  app.api.updateResetControls();
+  assert.match(feedback.textContent, /^Salva o annulla i punteggi in bozza/);
+  assert.equal(feedback.classList.contains('hidden'), false);
+  assert.equal(app.document.getElementById('resetScoresBtn').disabled, true);
+  assert.equal(app.document.getElementById('resetTournamentBtn').disabled, true);
+});
+
+test('reset feedback from the previous account is not shown in another eligible owner context', async () => {
+  const initial = harness(); const original = scoredGroupsWithPlayoffs(initial.Engine);
+  const app = harness({ configured: true, row: rowFor(original) }); await app.api.start(); await app.api.resetScores();
+  const feedback = app.document.getElementById('resetStatus');
+  assert.match(feedback.textContent, /azzerat/i);
+  app.api.online().session = { user: { id: 'admin-2', email: 'new-owner@admin.beachvolley.app' } };
+  app.api.online().tournament = { ...app.api.online().tournament, owner_id: 'admin-2' };
+  app.api.online().role = 'owner';
+  app.api.updateResetControls();
+  assert.equal(app.api.canResetBracket(), true, 'the new context is eligible, so a permissions warning cannot mask stale feedback');
+  assert.equal(feedback.textContent, '', 'a successful operation by the previous account is not attributed to the new account');
+  assert.equal(feedback.classList.contains('hidden'), true);
+  assert.equal(app.document.getElementById('resetScoresBtn').disabled, false);
 });

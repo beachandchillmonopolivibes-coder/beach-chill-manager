@@ -26,7 +26,7 @@ Online l’operazione è riservata al proprietario: gli altri admin possono gest
 
 Il reset controlla anche la revisione del torneo: se nel frattempo un altro admin ha salvato modifiche, la richiesta viene rifiutata per evitare di sovrascriverle. In caso di conflitto ricontrolla la versione online prima di ripetere l’operazione.
 
-Questa è l’eccezione esplicita al blocco del torneo avviato. Le modifiche ordinarie mantengono protetti organico, teste di serie, gironi e impostazioni; **“Azzera risultati” resta bloccato dopo l’avvio**. Per correggere un singolo risultato puoi continuare a usare **“Salva punteggio”** nella relativa partita.
+Questa è l’eccezione esplicita al blocco del torneo avviato. Le modifiche ordinarie mantengono protetti organico, teste di serie, gironi e impostazioni. Dalla **13.3.2**, il proprietario può anche usare **“Azzera risultati”** dopo l’avvio: mantiene sorteggio e calendario iniziale, rimuove punteggi e fasi successive e conserva la visibilità Live. Vedi la [guida aggiornata ai reset](CORREZIONI_RESET_IMPORT_13_3_2.md). Per correggere un singolo risultato puoi continuare a usare **“Salva punteggio”** nella relativa partita.
 
 ## Recuperare il backup dell’eliminazione
 

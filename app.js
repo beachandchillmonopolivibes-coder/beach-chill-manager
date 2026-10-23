@@ -50,6 +50,7 @@
   let localPersistenceError = false;
   let sharedDraftRequested = false;
   let draftCreationFailed = false;
+  let resetFeedback = { message: '', type: 'info' };
   let remoteConflict = null;
   let onlineRequest = 0;
   let loginInProgress = false;
@@ -438,7 +439,7 @@
     let message;
     if (localPersistenceError && online.tournament && !hasUnsavedLocalChanges()) message = 'Salvato online. La copia locale non è disponibile su questo dispositivo.';
     else if (localPersistenceError) message = 'Salvataggio sul dispositivo non riuscito: esporta un backup prima di chiudere.';
-    else if (online.resetting) message = 'Eliminazione del tabellone in corso… Il backup è conservato su questo dispositivo.';
+    else if (online.resetting) message = 'Reset in corso… Il backup è conservato su questo dispositivo.';
     else if (online.creating) message = 'Creazione della bozza condivisa… La vista giocatori resta disattivata.';
     else if (scoreDrafts.size) message = `${scoreDrafts.size} ${scoreDrafts.size === 1 ? 'punteggio in bozza' : 'punteggi in bozza'}: conferma ogni gara con “Salva punteggio”.`;
     else if (online.savePaused) message = 'Sincronizzazione sospesa: risolvi il conflitto indicato sotto.';
@@ -456,7 +457,7 @@
     bar.classList.toggle('save-error', localPersistenceError || online.savePaused || draftCreationFailed);
     bar.classList.toggle('save-pending', Boolean(sharedDraftRequested && !online.tournament || scoreDrafts.size || online.saving || online.creating || hasUnsavedLocalChanges()));
     if (button) button.disabled = online.saving || online.creating || online.resetting || Boolean(scoreDrafts.size);
-    if ($('resetTournamentBtn')) $('resetTournamentBtn').disabled = !canResetBracket();
+    updateResetControls();
   }
 
   function saveLocalState() {
@@ -740,6 +741,40 @@ function scheduleManualBoardRender() {
       && !online.saving && !online.creating && !online.resetting;
   }
 
+  function setResetFeedback(message, type = 'info') {
+    resetFeedback = { message, type, context: resetFeedbackContext() };
+    updateResetControls();
+  }
+
+  function resetFeedbackContext() {
+    return JSON.stringify([CONFIG.supabaseUrl || 'locale', tournamentSlug(), online.session?.user?.id || 'local']);
+  }
+
+  function updateResetControls() {
+    if ($('importInput')) $('importInput').disabled = tournamentStarted() || !canEdit() || online.resetting;
+    if ($('importBackupBtn')) $('importBackupBtn').disabled = $('importInput')?.disabled ?? true;
+    const allowed = canResetBracket() && !scoreDrafts.size && !online.savePaused;
+    if ($('resetTournamentBtn')) $('resetTournamentBtn').disabled = !allowed;
+    if ($('resetScoresBtn')) $('resetScoresBtn').disabled = !allowed;
+    const feedback = resetFeedback.context === resetFeedbackContext() ? resetFeedback : {};
+    let reason = '', type = 'info';
+    if (online.resetting) reason = 'Reset in corso. Attendi la conferma prima di chiudere questa pagina.';
+    else if (!canEdit()) reason = 'Accedi come proprietario per eseguire i reset del torneo.';
+    else if (online.tournament && !isOwner()) reason = 'Solo il proprietario può eseguire i reset del torneo.';
+    else if (scoreDrafts.size) reason = 'Salva o annulla i punteggi in bozza nelle partite prima di eseguire un reset.';
+    else if (online.savePaused) reason = 'Risolvi il conflitto di sincronizzazione prima di eseguire un reset.';
+    else if (online.saving || online.creating) reason = 'Salvataggio in corso: i pulsanti torneranno disponibili al termine.';
+    else if (feedback.message) { reason = feedback.message; type = feedback.type; }
+    else if (!state.matches.length) reason = 'Non ci sono partite da azzerare o un tabellone da eliminare.';
+    const notice = $('resetStatus');
+    if (notice) {
+      notice.textContent = reason;
+      notice.classList.toggle('hidden', !reason);
+      notice.classList.toggle('reset-error', type === 'error');
+      notice.setAttribute('role', type === 'error' ? 'alert' : 'status');
+    }
+  }
+
   function resetBackupKey() {
     return `${localKey()}:reset-backup:${encodeURIComponent(CONFIG.supabaseUrl || 'locale')}:${online.session?.user?.id || 'local'}`;
   }
@@ -759,7 +794,7 @@ function scheduleManualBoardRender() {
     const blob = new Blob([JSON.stringify(backup.state, null, 2)], { type: 'application/json' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `${slugify(backup.state.settings.tournamentName)}-prima-eliminazione-${backup.savedAt.slice(0, 10)}.json`;
+    link.download = `${slugify(backup.state.settings.tournamentName)}-prima-del-reset-${backup.savedAt.slice(0, 10)}.json`;
     link.click();
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   }
@@ -2300,11 +2335,14 @@ async function initializeOnline() {
       if ($('copyPublicLinkBtn')) $('copyPublicLinkBtn').disabled = true;
     }
     $('importInput').disabled = tournamentStarted() || !canEdit();
-    $('resetScoresBtn').disabled = tournamentStarted() || !canEdit();
-    $('resetTournamentBtn').disabled = !canResetBracket();
+    if ($('importBackupBtn')) $('importBackupBtn').disabled = $('importInput').disabled;
+    if ($('importBackupHelp')) $('importBackupHelp').textContent = tournamentStarted()
+      ? 'Per ripristinare un backup, elimina prima il tabellone. Le squadre attuali saranno conservate.'
+      : 'Scegli un file JSON esportato da questa app. Verrà richiesta una conferma prima di sostituire i dati.';
+    updateResetControls();
     if ($('resetBracketNotice')) $('resetBracketNotice').textContent = online.tournament && !isOwner()
       ? 'L’eliminazione del tabellone è riservata al proprietario del torneo.'
-      : 'Puoi eliminare il tabellone anche dopo l’avvio e la pubblicazione. Le squadre restano iscritte; partite, gironi e risultati vengono rimossi. Il torneo torna in preparazione con Live disattivato.';
+      : 'Azzera risultati mantiene gli accoppiamenti e il calendario iniziale. Elimina tabellone rimuove anche gironi e partite e disattiva il Live. Entrambi sono disponibili al proprietario anche dopo la pubblicazione e conservano squadre e backup.';
     $('downloadResetBackupBtn')?.classList.toggle('hidden', !readLastResetBackup());
     renderAdminList();
   }
@@ -2518,36 +2556,34 @@ async function initializeOnline() {
   }
 
   async function resetScores() {
-    if (!ensureRosterEditable() || !state.matches.length) return;
-    const confirmed = await confirmAction('Azzerare tutti i risultati?', 'Il sorteggio o la fase iniziale resteranno; turni successivi, punteggi, campi e orari verranno rimossi.', 'Azzera risultati');
-    if (!confirmed) return;
-    Engine.resetScores(state);
-    markChanged({ render: true, immediate: true });
-    showToast('Risultati azzerati.', 'success');
+    return resetTournament({ onlyScores: true });
   }
 
-  async function resetTournament() {
-    if (!canResetBracket()) { showToast(online.tournament && !isOwner() ? 'Solo il proprietario può eliminare il tabellone.' : 'Attendi il completamento dei salvataggi e verifica che esista un tabellone.', 'error'); return; }
-    if (scoreDrafts.size) { showToast('Salva o annulla i punteggi in bozza prima di eliminare il tabellone.', 'error'); return; }
+  async function resetTournament({ onlyScores = false } = {}) {
+    setResetFeedback('');
+    if (!canResetBracket()) { setResetFeedback(online.tournament && !isOwner() ? 'Solo il proprietario può eseguire il reset.' : 'Attendi il completamento dei salvataggi e verifica che esista un tabellone.', 'error'); return; }
+    if (scoreDrafts.size) { setResetFeedback('Salva o annulla i punteggi in bozza prima di eseguire il reset.', 'error'); return; }
     if (hasUnsavedLocalChanges() && online.tournament) await flushOnlineSave();
-    if (hasUnsavedLocalChanges() || online.savePaused || !canResetBracket()) { showToast('Completa o risolvi le modifiche in sospeso prima di eliminare il tabellone.', 'error'); return; }
+    if (hasUnsavedLocalChanges() || online.savePaused || !canResetBracket()) { setResetFeedback('Completa o risolvi le modifiche in sospeso prima di eseguire il reset.', 'error'); return; }
     const targetId = online.tournament?.id || null;
     const targetSlug = tournamentSlug();
     const expectedUser = online.session?.user?.id || null;
     const expectedRevision = online.revision;
     const expectedVersion = localEditVersion;
     const originalState = state;
-    const confirmed = await confirmAction('Eliminare il tabellone?', 'Verranno eliminate tutte le partite, i risultati e i gironi. Le squadre, le impostazioni e gli accessi admin resteranno. Il Live sarà disattivato. Prima di procedere viene conservato un backup su questo dispositivo.', 'Elimina tabellone');
-    if (!confirmed) return;
+    const confirmed = await confirmAction(onlyScores ? 'Azzerare tutti i risultati?' : 'Eliminare il tabellone?', onlyScores
+      ? 'Verranno azzerati tutti i punteggi e rimossi i turni successivi. Gironi, accoppiamenti iniziali, campi e orari iniziali resteranno identici. La visibilità Live resterà invariata. Prima di procedere viene conservato un backup su questo dispositivo.'
+      : 'Verranno eliminate tutte le partite, i risultati e i gironi. Le squadre, le impostazioni e gli accessi admin resteranno. Il Live sarà disattivato. Prima di procedere viene conservato un backup su questo dispositivo.', onlyScores ? 'Azzera risultati' : 'Elimina tabellone');
+    if (!confirmed) { setResetFeedback('Operazione annullata. I dati del torneo sono invariati.'); return; }
     if (state !== originalState || targetId !== (online.tournament?.id || null) || targetSlug !== tournamentSlug() || expectedUser !== (online.session?.user?.id || null)
       || expectedRevision !== online.revision || expectedVersion !== localEditVersion || !canResetBracket()) {
-      showToast('Il torneo è cambiato durante la conferma. Riapri l’eliminazione per controllare i dati aggiornati.', 'error');
+      setResetFeedback('Il torneo è cambiato durante la conferma. Riapri il reset per controllare i dati aggiornati.', 'error');
       return;
     }
     try {
-      localStorage.setItem(resetBackupKey(), JSON.stringify({state:cloneValue(state),slug:targetSlug,tournamentId:targetId,revision:expectedRevision,publicRead:Boolean(online.tournament?.public_read),userId:online.session?.user?.id || 'local',savedAt:new Date().toISOString()}));
+      localStorage.setItem(resetBackupKey(), JSON.stringify({state:cloneValue(state),operation:onlyScores ? 'scores' : 'bracket',slug:targetSlug,tournamentId:targetId,revision:expectedRevision,publicRead:Boolean(online.tournament?.public_read),userId:online.session?.user?.id || 'local',savedAt:new Date().toISOString()}));
     } catch (_) {
-      showToast('Backup non riuscito: esporta una copia e libera spazio nel browser prima di riprovare. Il tabellone è ancora presente.', 'error');
+      setResetFeedback('Backup non riuscito: esporta una copia e libera spazio nel browser prima di riprovare. Il tabellone è ancora presente.', 'error');
       return;
     }
     clearTimeout(saveTimer);
@@ -2555,30 +2591,40 @@ async function initializeOnline() {
     online.resetting = true;
     online.saving = true;
     $('mainContent').inert = true;
-    setConnectionStatus('Eliminazione…');
+    setResetFeedback(onlyScores ? 'Azzeramento dei risultati in corso…' : 'Eliminazione del tabellone in corso…');
+    setConnectionStatus('Reset in corso…');
     renderSaveStatus();
     try {
       if (targetId) {
-        const row = await DB.resetTournamentBracket(targetId, expectedRevision);
+        let row;
+        if (onlyScores) {
+          const cleared = cloneValue(state);
+          Engine.resetScores(cleared, { allowStarted: true });
+          row = await DB.saveTournamentState(targetId, cleared, expectedRevision);
+        } else row = await DB.resetTournamentBracket(targetId, expectedRevision);
         if (expectedUser !== (online.session?.user?.id || null) || targetId !== online.tournament?.id || targetSlug !== tournamentSlug()) return;
         online.tournament = row; online.revision = Number(row.revision);
         state = Engine.normalizeState(row.state);
       } else {
         state = cloneValue(state);
-        Engine.resetTournament(state, { allowStarted: true });
+        if (onlyScores) Engine.resetScores(state, { allowStarted: true });
+        else Engine.resetTournament(state, { allowStarted: true });
       }
       scoreDrafts.clear(); clearDirtyTracking(localEditVersion);
       pendingRealtimeRow = null; pendingRemoteRefresh = false;
       online.savePaused = false; remoteConflict = null;
       online.resetting = false; online.saving = false;
       saveLocalState(); hideSaveProblem();
-      renderAll(); switchTab('setup');
-      setConnectionStatus(targetId ? 'Bozza privata' : 'Locale', targetId ? 'online' : '');
-      showToast('Tabellone eliminato. Squadre conservate; puoi generare un nuovo calendario. Backup disponibile in Altro.', 'success');
+      const result = onlyScores ? 'Risultati azzerati. Accoppiamenti e calendario iniziali conservati. Backup disponibile in Altro.'
+        : 'Tabellone eliminato. Squadre conservate; puoi generare un nuovo calendario. Backup disponibile in Altro.';
+      setResetFeedback(result, 'success');
+      renderAll(); switchTab(onlyScores ? 'matches' : 'setup');
+      setConnectionStatus(targetId ? (onlyScores ? 'Sincronizzato' : 'Bozza privata') : 'Locale', targetId ? 'online' : '');
+      showToast(result, 'success');
     } catch (error) {
       if (expectedUser !== (online.session?.user?.id || null) || targetSlug !== tournamentSlug()) return;
       setConnectionStatus('Eliminazione non completata', 'error');
-      showToast(String(error?.message || '').includes('revision_conflict')
+      setResetFeedback(String(error?.message || '').includes('revision_conflict')
         ? 'Un altro admin ha aggiornato il torneo. Il tabellone è ancora presente: carica la versione aggiornata e riprova.' : humanizeError(error), 'error');
     } finally {
       online.resetting = false; online.saving = false;
@@ -2886,6 +2932,10 @@ async function initializeOnline() {
     });
     $('exportBtn').addEventListener('click', exportBackup);
     $('importInput').addEventListener('change', (event) => { importBackup(event.target.files?.[0]); event.target.value = ''; });
+    $('importBackupBtn')?.addEventListener('click', () => {
+      if (!canEdit() || tournamentStarted() || online.resetting || $('importInput').disabled) return;
+      $('importInput').click();
+    });
     $('resetScoresBtn').addEventListener('click', resetScores);
     $('resetTournamentBtn').addEventListener('click', resetTournament);
     $('downloadResetBackupBtn')?.addEventListener('click', downloadResetBackup);

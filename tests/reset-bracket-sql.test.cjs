@@ -182,3 +182,74 @@ test('SQL delivery files are complete compact scripts with named body delimiters
     assert.ok(source.indexOf(check)>source.lastIndexOf('commit;'));
   }
 });
+
+test('published started results can be cleared with the real engine through the ordinary guarded CAS save in every format',async()=>{
+  const cases=[
+    {format:E.FORMATS.SINGLE_ELIMINATION,count:7},
+    {format:E.FORMATS.DOUBLE_ELIMINATION,count:7},
+    {format:E.FORMATS.ROUND_ROBIN_FINAL4,count:5},
+    {format:E.FORMATS.GROUPS_PLAYOFF,count:8,options:{groupCount:2,playoffSize:6,protectGroupWinners:true,silverEnabled:true,silverSize:'all'}},
+  ];
+  const scoreSets=match=>{
+    const target=match.rule==='single_15'||match.rule==='best_of_3_15'?15:21;
+    const sets=[{a:String(target),b:'10'},{a:'',b:''},{a:'',b:''}];
+    if(match.rule.startsWith('best_of_3'))sets[1]={a:String(target),b:'10'};
+    return sets;
+  };
+  const initialLayout=state=>state.matches.filter(m=>m.stage===0).map(m=>Object.fromEntries(
+    Object.entries(m).filter(([key])=>!['sets','winnerId','loserId','updatedAt'].includes(key))
+  ));
+  for(const config of cases){
+    let state=E.createDefaultState();
+    state.teams.forEach((team,index)=>{team.name=index<config.count?`Score reset ${index+1}`:'';team.seed=index<Math.min(4,config.count)?index+1:null;});
+    Object.assign(state.settings,{format:config.format,courts:12,slotMinutes:20,dayEnd:'23:59'});
+    Object.assign(state.settings.formatOptions,config.options||{});
+    E.generateTournament(state,{drawCode:'SCORE-RESET-SQL'});
+    let row=await create(state);
+    state=E.normalizeState(row.state);
+    for(const match of [...state.matches])if(!match.bye&&!match.winnerId)E.updateMatchScores(state,match.id,scoreSets(match));
+    row=await save(row,state);
+    E.generateNextStage(state);
+    assert.ok(state.matches.some(m=>m.stage>0),config.format+' has a later stage to remove');
+    const later=state.matches.find(m=>m.stage>0&&!m.bye);
+    if(later)E.updateMatchScores(state,later.id,scoreSets(later));
+    row=await save(row,state);
+    const before=row;
+    const draw=copy(state.settings.draw),groups=copy(state.groups),layout=copy(initialLayout(state));
+    const startedAt=state.metadata.startedAt;
+    assert.ok(layout.filter(m=>!m.bye).every(m=>m.court&&m.startTime),config.format+' has an actual initial schedule');
+
+    const candidate=E.normalizeState(copy(row.state));
+    E.resetScores(candidate,{allowStarted:true});
+    assert.equal(candidate.metadata.startedAt,startedAt);
+    assert.deepEqual(copy(candidate.settings.draw),draw);
+    assert.deepEqual(copy(candidate.groups),groups);
+    assert.deepEqual(copy(initialLayout(candidate)),layout);
+    assert.ok(candidate.matches.every(m=>m.stage===0));
+    assert.ok(candidate.matches.every(m=>m.sets.every(set=>set.a===''&&set.b==='')));
+    assert.ok(candidate.matches.filter(m=>!m.bye).every(m=>m.winnerId===null&&m.loserId===null));
+    assert.ok(candidate.teams.every(team=>team.losses===0&&!team.out));
+    assert.deepEqual(copy(candidate.qualifiers),[]);
+    assert.deepEqual(copy(candidate.silverQualifiers),[]);
+    assert.equal(candidate.postseasonPlan,null);
+    assert.equal(candidate.championId,null);
+    assert.equal(candidate.silverChampionId,null);
+    row=await save(row,candidate);
+    assert.equal(row.public_read,true,'score reset preserves the already published view');
+    assert.equal(Number(row.revision),Number(before.revision)+1);
+    assert.deepEqual(row.state.matches,copy(candidate.matches));
+    const seen=(await as('anon',null,'SELECT state FROM public.tournaments WHERE id=$1',[row.id])).rows[0];
+    assert.deepEqual(seen.state.matches,row.state.matches,'public readers see cleared results on the same bracket');
+
+    const stale=copy(before.state);stale.teams[0].name='Stale admin';
+    await assert.rejects(save(before,stale),/revision_conflict/);
+    assert.deepEqual(await actual(row),row);
+    const resumed=E.normalizeState(copy(row.state));
+    const first=resumed.matches.find(m=>!m.bye);
+    E.updateMatchScores(resumed,first.id,scoreSets(first));
+    row=await save(row,resumed);
+    assert.equal(row.state.matches.find(m=>m.id===first.id).winnerId,first.aId,'new scores can be entered normally');
+    assert.equal(row.public_read,true);
+    assert.deepEqual(initialLayout(row.state),layout);
+  }
+});

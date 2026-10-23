@@ -24,10 +24,10 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="style.css?v=13.3.1" />
-  <link rel="stylesheet" href="hmi-v10.css?v=13.3.1" />
-  <link rel="stylesheet" href="professional.css?v=13.3.1" />
-  <link rel="stylesheet" href="arena.css?v=13.3.1" />
+  <link rel="stylesheet" href="style.css?v=13.3.2" />
+  <link rel="stylesheet" href="hmi-v10.css?v=13.3.2" />
+  <link rel="stylesheet" href="professional.css?v=13.3.2" />
+  <link rel="stylesheet" href="arena.css?v=13.3.2" />
 </head>
 <body>
   <a class="skip-link" href="#mainContent">Vai al contenuto</a>
@@ -64,7 +64,7 @@
         <span class="brand-text">
           <span class="brand-wordmark">BEACH <i>&amp;</i> CHILL<span>.</span></span><strong id="appTitle">Beach &amp; Chill</strong>
           <small id="formatBadge">Tournament Manager</small>
-          <span class="app-version" id="appVersion" aria-label="Versione applicazione 13.3.1">v13.3.1</span>
+          <span class="app-version" id="appVersion" aria-label="Versione applicazione 13.3.2">v13.3.2</span>
         </span>
       </div>
 
@@ -506,13 +506,15 @@
           <section class="card editor-only">
             <div class="card-heading"><div><p class="overline">Sicurezza</p><h2>Backup e ripristino</h2></div></div>
             <p class="body-copy">Esporta una copia JSON prima dell’inizio e al termine della giornata.</p>
-            <div class="button-stack"><button class="button secondary" id="exportBtn" type="button">Esporta backup</button><label class="button ghost file-button">Importa backup<input id="importInput" type="file" accept="application/json" /></label></div>
+            <div class="button-stack"><button class="button secondary" id="exportBtn" type="button">Esporta backup</button><button class="button ghost" id="importBackupBtn" type="button" aria-describedby="importBackupHelp">Importa backup</button><input id="importInput" type="file" accept=".json,application/json" hidden /></div>
+            <p class="field-status" id="importBackupHelp">Scegli un file JSON esportato da questa app.</p>
           </section>
 
           <section class="card editor-only danger-card">
             <div class="card-heading"><div><p class="overline">Operazioni irreversibili</p><h2>Reset</h2></div></div>
-            <p class="body-copy" id="resetBracketNotice">Il proprietario può eliminare il tabellone anche dopo la pubblicazione. Le squadre restano iscritte e il torneo torna in preparazione con Live disattivato.</p>
-            <div class="button-stack"><button class="button secondary" id="resetScoresBtn" type="button">Azzera risultati</button><button class="button danger" id="resetTournamentBtn" type="button">Elimina tabellone</button><button class="button secondary hidden" id="downloadResetBackupBtn" type="button">Scarica backup prima dell’eliminazione</button></div>
+            <p class="body-copy" id="resetBracketNotice">Azzera risultati conserva il calendario iniziale. Elimina tabellone permette di ripartire con le squadre iscritte. Entrambi richiedono conferma e salvano un backup.</p>
+            <div class="button-stack"><button class="button secondary" id="resetScoresBtn" type="button">Azzera risultati</button><button class="button danger" id="resetTournamentBtn" type="button">Elimina tabellone</button><button class="button secondary hidden" id="downloadResetBackupBtn" type="button">Scarica backup prima del reset</button></div>
+            <p class="field-status reset-status hidden" id="resetStatus" role="status" aria-live="polite"></p>
           </section>
 
           <section class="card">
@@ -562,11 +564,11 @@
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-  <script src="vendor/supabase.js?v=13.3.1"></script>
-  <script src="config.js?v=13.3.1"></script>
-  <script src="engine.js?v=13.3.1"></script>
-  <script src="db.js?v=13.3.1"></script>
-  <script src="app.js?v=13.3.1"></script>
+  <script src="vendor/supabase.js?v=13.3.2"></script>
+  <script src="config.js?v=13.3.2"></script>
+  <script src="engine.js?v=13.3.2"></script>
+  <script src="db.js?v=13.3.2"></script>
+  <script src="app.js?v=13.3.2"></script>
 
 
 </body>
